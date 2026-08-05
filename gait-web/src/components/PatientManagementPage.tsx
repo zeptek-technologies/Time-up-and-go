@@ -1,0 +1,417 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useTugData, type TugData } from "../hooks/useTugData";
+import { riskClass, riskThai } from "../lib/meta";
+import { riskLevelOf } from "../lib/tugRisk";
+import { formatIsoThai, formatThai } from "../lib/time";
+import { IconClose, IconPatients, IconPlus, IconUser } from "./Icons";
+
+interface ConditionOption {
+  id: string;
+  label: string;
+  hint: string;
+  group: "ระบบประสาท" | "กระดูกและข้อ" | "การทรงตัว" | "หัวใจและปอด";
+}
+
+// Common diagnosed conditions that can change walking, balance, joint motion,
+// muscle control, or exercise tolerance. These are background data—not diagnoses.
+const CONDITION_OPTIONS: ConditionOption[] = [
+  { id: "parkinsons", label: "โรคพาร์กินสัน / กลุ่มอาการพาร์กินสัน", hint: "อาจก้าวสั้น เดินช้า หรือเสียการทรงตัว", group: "ระบบประสาท" },
+  { id: "stroke", label: "เคยเป็นโรคหลอดเลือดสมอง", hint: "อาจมีแขนขาอ่อนแรงหรือควบคุมการเดินได้ไม่เท่ากัน", group: "ระบบประสาท" },
+  { id: "multiple-sclerosis", label: "โรคปลอกประสาทเสื่อมแข็ง (MS)", hint: "อาจมีอาการอ่อนแรง เกร็ง และเดินไม่มั่นคง", group: "ระบบประสาท" },
+  { id: "peripheral-neuropathy", label: "ปลายประสาทเสื่อม / เบาหวานลงปลายประสาท", hint: "อาจชาเท้า รับรู้ตำแหน่งเท้าลดลง หรือเสียสมดุล", group: "ระบบประสาท" },
+  { id: "ataxia", label: "โรคสมองน้อยหรือภาวะเดินเซ (Ataxia)", hint: "กระทบการประสานงานและการทรงตัว", group: "ระบบประสาท" },
+  { id: "arthritis", label: "ข้อเสื่อมหรือข้ออักเสบที่สะโพก เข่า หรือเท้า", hint: "ความปวดและข้อฝืดอาจทำให้ลุกหรือเดินช้าลง", group: "กระดูกและข้อ" },
+  { id: "vestibular", label: "โรคหูชั้นในหรือโรคการทรงตัว", hint: "อาจเวียนศีรษะ เดินโซเซ หรือรู้สึกว่าจะล้ม", group: "การทรงตัว" },
+  { id: "heart-failure", label: "ภาวะหัวใจล้มเหลว", hint: "อาจเหนื่อยหรือหอบเมื่อเดินระยะสั้น", group: "หัวใจและปอด" },
+  { id: "copd", label: "โรคปอดอุดกั้นเรื้อรัง (COPD)", hint: "อาจหายใจลำบากและเหนื่อยเมื่อออกแรง", group: "หัวใจและปอด" },
+];
+
+const CONDITION_LABEL = new Map(CONDITION_OPTIONS.map((item) => [item.id, item.label]));
+
+export default function PatientManagementPage() {
+  const data = useTugData();
+  const [search, setSearch] = useState("");
+  const [selectedId, setSelectedId] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
+
+  const filteredPatients = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase("th");
+    if (!query) return data.patients;
+    return data.patients.filter((patient) => {
+      const conditions = patient.conditions.map((id) => CONDITION_LABEL.get(id) ?? id).join(" ");
+      return [patient.name, patient.gender, patient.note, String(patient.age ?? ""), conditions]
+        .join(" ")
+        .toLocaleLowerCase("th")
+        .includes(query);
+    });
+  }, [data.patients, search]);
+
+  const effectiveSelectedId = data.patients.some((patient) => patient.id === selectedId)
+    ? selectedId
+    : (data.patients[0]?.id ?? "");
+  const selectedPatient = data.patients.find((patient) => patient.id === effectiveSelectedId) ?? null;
+
+  return (
+    <div className="patient-manager">
+      <header className="pm-header">
+        <div className="pm-header__inner">
+          <a className="pm-brand" href="./" aria-label="กลับไปหน้าภาพรวม">
+            <span className="pm-brand__mark" aria-hidden="true">+</span>
+            <span>
+              <strong>TUG Care Board</strong>
+              <small>ทะเบียนและประวัติผู้ทดสอบ</small>
+            </span>
+          </a>
+          <a className="pm-back" href="./">← กลับหน้าภาพรวม</a>
+        </div>
+      </header>
+
+      <main className="pm-main">
+        <section className="pm-intro" aria-labelledby="pm-title">
+          <div>
+            <span className="section-header__eyebrow">Patient Registry</span>
+            <h1 id="pm-title">จัดการผู้ทดสอบ</h1>
+            <p>ค้นหารายชื่อ เลือกดูผลเฉพาะบุคคล และบันทึกโรคประจำตัวที่อาจมีผลต่อการเดิน</p>
+          </div>
+          <button className="btn btn--primary pm-add-button" type="button" onClick={() => setAddOpen(true)}>
+            <IconPlus width={18} height={18} />
+            เพิ่มผู้ทดสอบ
+          </button>
+        </section>
+
+        {data.conn === "error" && (
+          <div className="pm-connection pm-connection--error" role="alert">
+            เชื่อมต่อข้อมูลไม่สำเร็จ กรุณาตรวจอินเทอร์เน็ตแล้วโหลดหน้าใหม่
+          </div>
+        )}
+
+        <div className="pm-workspace">
+          <aside className="pm-roster" aria-label="รายชื่อผู้ทดสอบ">
+            <div className="pm-roster__toolbar">
+              <label className="pm-search">
+                <span className="sr-only">ค้นหาผู้ทดสอบ</span>
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                  <path d="M16 16l4 4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                </svg>
+                <input
+                  type="search"
+                  placeholder="ค้นหาชื่อ อายุ หรือโรคประจำตัว"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+              </label>
+              <div className="pm-roster__count">
+                พบ {filteredPatients.length} จาก {data.patients.length} คน
+              </div>
+            </div>
+
+            <div className="pm-roster__list">
+              {data.conn === "pending" ? (
+                <div className="pm-empty">กำลังโหลดรายชื่อ…</div>
+              ) : filteredPatients.length === 0 ? (
+                <div className="pm-empty">
+                  <IconPatients width={36} height={36} />
+                  <strong>{data.patients.length === 0 ? "ยังไม่มีผู้ทดสอบ" : "ไม่พบรายชื่อที่ค้นหา"}</strong>
+                  <span>{data.patients.length === 0 ? "กด “เพิ่มผู้ทดสอบ” เพื่อเริ่มต้น" : "ลองใช้คำค้นอื่น"}</span>
+                </div>
+              ) : (
+                filteredPatients.map((patient) => {
+                  const resultCount = data.results.filter((result) => result.patientId === patient.id).length;
+                  return (
+                    <button
+                      className={`pm-person ${patient.id === effectiveSelectedId ? "pm-person--active" : ""}`}
+                      type="button"
+                      key={patient.id}
+                      onClick={() => setSelectedId(patient.id)}
+                      aria-pressed={patient.id === effectiveSelectedId}
+                    >
+                      <span className="pm-person__avatar" aria-hidden="true">{patient.name.charAt(0) || "?"}</span>
+                      <span className="pm-person__body">
+                        <strong>{patient.name}</strong>
+                        <span>{patient.age ? `${patient.age} ปี` : "ไม่ระบุอายุ"} · ผลทดสอบ {resultCount} ครั้ง</span>
+                      </span>
+                      <span className="pm-person__arrow" aria-hidden="true">›</span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </aside>
+
+          <section className="pm-detail" aria-live="polite">
+            {selectedPatient ? (
+              <PatientDetail data={data} patient={selectedPatient} onDeleted={() => setSelectedId("")} />
+            ) : (
+              <div className="pm-detail-empty">
+                <IconUser width={48} height={48} />
+                <h2>เลือกผู้ทดสอบจากรายชื่อ</h2>
+                <p>เมื่อเลือกแล้ว ประวัติการทดสอบของบุคคลนั้นจะแสดงที่นี่</p>
+              </div>
+            )}
+          </section>
+        </div>
+      </main>
+
+      {addOpen && <AddPatientDialog data={data} onClose={() => setAddOpen(false)} />}
+    </div>
+  );
+}
+
+function PatientDetail({
+  data,
+  patient,
+  onDeleted,
+}: {
+  data: TugData;
+  patient: TugData["patients"][number];
+  onDeleted: () => void;
+}) {
+  const results = data.results.filter((result) => result.patientId === patient.id);
+  const completed = results.filter((result) => result.status === "completed");
+  const assessments = data.assessments.filter((assessment) => assessment.patientId === patient.id);
+  const average = completed.length
+    ? completed.reduce((sum, result) => sum + result.totalSec, 0) / completed.length
+    : null;
+  const latest = completed[0] ?? null;
+
+  const remove = async () => {
+    if (!confirm(`ต้องการลบผู้ทดสอบ “${patient.name}” จริงหรือไม่?\nผลเดิมจะไม่ถูกลบ แต่จะยกเลิกการผูกกับรายชื่อนี้`)) return;
+    try {
+      await data.removePatient(patient.id);
+      onDeleted();
+    } catch (error) {
+      alert(`ลบผู้ทดสอบไม่สำเร็จ: ${(error as Error).message}`);
+    }
+  };
+
+  return (
+    <>
+      <div className="pm-profile">
+        <div className="pm-profile__identity">
+          <span className="pm-profile__avatar" aria-hidden="true">{patient.name.charAt(0) || "?"}</span>
+          <div>
+            <span className="section-header__eyebrow">Selected Patient</span>
+            <h2>{patient.name}</h2>
+            <p>
+              {[patient.age ? `${patient.age} ปี` : "", patient.gender].filter(Boolean).join(" · ") || "ไม่ระบุอายุและเพศ"}
+            </p>
+          </div>
+        </div>
+        <button className="pm-delete" type="button" onClick={remove}>ลบผู้ทดสอบ</button>
+      </div>
+
+      <div className="pm-conditions">
+        <div className="pm-section-heading">
+          <h3>โรคประจำตัวที่บันทึกไว้</h3>
+          <span>ข้อมูลประกอบการอ่านผล ไม่ใช่การวินิจฉัย</span>
+        </div>
+        {patient.conditions.length > 0 ? (
+          <div className="pm-condition-tags">
+            {patient.conditions.map((condition) => (
+              <span key={condition}>{CONDITION_LABEL.get(condition) ?? condition}</span>
+            ))}
+          </div>
+        ) : (
+          <p className="pm-muted">ไม่ได้ระบุโรคประจำตัวที่เกี่ยวข้องกับการเดิน</p>
+        )}
+        {patient.note && <p className="pm-note"><strong>หมายเหตุ:</strong> {patient.note}</p>}
+      </div>
+
+      <div className="pm-stats" aria-label="สรุปผล TUG">
+        <div><span>ทดสอบสำเร็จ</span><strong>{completed.length}</strong><small>ครั้ง</small></div>
+        <div><span>เวลาเฉลี่ย</span><strong>{average === null ? "—" : average.toFixed(2)}</strong><small>{average === null ? "" : "วินาที"}</small></div>
+        <div className={latest ? `pm-stat--${riskClass(riskLevelOf(latest.totalSec))}` : ""}>
+          <span>ผลล่าสุด</span>
+          <strong>{latest ? riskThai(riskLevelOf(latest.totalSec)) : "—"}</strong>
+          <small>{latest ? `${latest.totalSec.toFixed(2)} วินาที` : "ยังไม่มีผล"}</small>
+        </div>
+      </div>
+
+      <div className="pm-history">
+        <div className="pm-section-heading">
+          <h3>ประวัติ TUG</h3>
+          <span>{results.length} รายการ</span>
+        </div>
+        <div className="pm-history__table-wrap">
+          <table className="pm-history__table">
+            <thead>
+              <tr><th>วันและเวลา</th><th>รอบ</th><th>ไป</th><th>กลับ</th><th>รวม</th><th>ผล</th></tr>
+            </thead>
+            <tbody>
+              {results.length === 0 ? (
+                <tr><td colSpan={6} className="pm-table-empty">ยังไม่มีผล TUG ของผู้ทดสอบคนนี้</td></tr>
+              ) : results.map((result) => {
+                const level = riskLevelOf(result.totalSec);
+                return (
+                  <tr key={result.id}>
+                    <td data-label="วันและเวลา">{formatThai(result.finishedAt)}</td>
+                    <td data-label="รอบ">{result.trialNo || "—"}</td>
+                    <td data-label="ไป">{result.checkpointSec.toFixed(2)}</td>
+                    <td data-label="กลับ">{result.returnSec > 0 ? result.returnSec.toFixed(2) : "—"}</td>
+                    <td data-label="รวม"><strong>{result.totalSec.toFixed(2)} วินาที</strong></td>
+                    <td data-label="ผล">
+                      {result.status === "aborted"
+                        ? <span className="pm-result pm-result--aborted">ยกเลิก</span>
+                        : <span className={`pm-result pm-result--${riskClass(level)}`}>{riskThai(level)}</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="pm-history">
+        <div className="pm-section-heading">
+          <h3>ประวัติการประเมินการเดินจากกล้อง</h3>
+          <span>{assessments.length} รายการ</span>
+        </div>
+        <div className="pm-history__table-wrap">
+          <table className="pm-history__table">
+            <thead>
+              <tr><th>วันและเวลา</th><th>ผลที่ตรวจพบ</th><th>ความมั่นใจ</th><th>จำนวนก้าว</th><th>จังหวะก้าว</th></tr>
+            </thead>
+            <tbody>
+              {assessments.length === 0 ? (
+                <tr><td colSpan={5} className="pm-table-empty">ยังไม่มีผลจากกล้องของผู้ทดสอบคนนี้</td></tr>
+              ) : assessments.map((assessment) => (
+                <tr key={assessment.id}>
+                  <td data-label="วันและเวลา">{formatIsoThai(assessment.timestampRaw)}</td>
+                  <td data-label="ผลที่ตรวจพบ">{assessment.condition}</td>
+                  <td data-label="ความมั่นใจ">{assessment.confidence.toFixed(1)}%</td>
+                  <td data-label="จำนวนก้าว">{assessment.stepCount ?? "—"}</td>
+                  <td data-label="จังหวะก้าว">{assessment.cadenceAvg === null ? "—" : `${assessment.cadenceAvg.toFixed(1)} ก้าว/นาที`}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function AddPatientDialog({ data, onClose }: { data: TugData; onClose: () => void }) {
+  const [name, setName] = useState("");
+  const [age, setAge] = useState("");
+  const [gender, setGender] = useState("");
+  const [note, setNote] = useState("");
+  const [conditions, setConditions] = useState<string[]>([]);
+  const [otherCondition, setOtherCondition] = useState("");
+  const [saving, setSaving] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  const toggleCondition = (id: string) => {
+    setConditions((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  };
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!name.trim()) return;
+    setSaving(true);
+    const savedConditions = [...conditions];
+    if (otherCondition.trim()) savedConditions.push(otherCondition.trim());
+    try {
+      await data.addPatient(name.trim(), age, gender, note.trim(), savedConditions);
+      onClose();
+    } catch (error) {
+      alert(`บันทึกผู้ทดสอบไม่สำเร็จ: ${(error as Error).message}`);
+      setSaving(false);
+    }
+  };
+
+  const groups = ["ระบบประสาท", "กระดูกและข้อ", "การทรงตัว", "หัวใจและปอด"] as const;
+
+  return (
+    <div className="pm-dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <div className="pm-dialog" role="dialog" aria-modal="true" aria-labelledby="pm-dialog-title" ref={dialogRef}>
+        <div className="pm-dialog__header">
+          <div>
+            <span className="section-header__eyebrow">New Patient</span>
+            <h2 id="pm-dialog-title">เพิ่มผู้ทดสอบใหม่</h2>
+          </div>
+          <button ref={closeButtonRef} className="pm-dialog__close" type="button" onClick={onClose} aria-label="ปิดหน้าต่าง">
+            <IconClose width={20} height={20} />
+          </button>
+        </div>
+
+        <form onSubmit={submit}>
+          <div className="pm-form__identity">
+            <label className="pm-field pm-field--wide">
+              <span>ชื่อ–นามสกุล <em>*</em></span>
+              <input required value={name} onChange={(event) => setName(event.target.value)} placeholder="เช่น สมชาย ใจดี" />
+            </label>
+            <label className="pm-field">
+              <span>อายุ (ปี)</span>
+              <input type="number" min={1} max={150} value={age} onChange={(event) => setAge(event.target.value)} placeholder="65" />
+            </label>
+            <label className="pm-field">
+              <span>เพศ</span>
+              <select value={gender} onChange={(event) => setGender(event.target.value)}>
+                <option value="">— ไม่ระบุ —</option>
+                <option value="ชาย">ชาย</option>
+                <option value="หญิง">หญิง</option>
+                <option value="อื่นๆ">อื่นๆ</option>
+              </select>
+            </label>
+          </div>
+
+          <fieldset className="pm-condition-fieldset">
+            <legend>โรคประจำตัวที่อาจมีผลต่อการเดิน</legend>
+            <p className="pm-fieldset-help">เลือกเฉพาะโรคที่ผู้ทดสอบได้รับการวินิจฉัยแล้ว สามารถเลือกได้มากกว่าหนึ่งข้อ</p>
+            {groups.map((group) => (
+              <div className="pm-condition-group" key={group}>
+                <h3>{group}</h3>
+                <div className="pm-condition-grid">
+                  {CONDITION_OPTIONS.filter((option) => option.group === group).map((option) => (
+                    <label className="pm-condition-option" key={option.id}>
+                      <input
+                        type="checkbox"
+                        checked={conditions.includes(option.id)}
+                        onChange={() => toggleCondition(option.id)}
+                      />
+                      <span>
+                        <strong>{option.label}</strong>
+                        <small>{option.hint}</small>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <label className="pm-field pm-field--other">
+              <span>โรคหรือภาวะอื่นที่มีผลต่อการเดิน</span>
+              <input value={otherCondition} onChange={(event) => setOtherCondition(event.target.value)} placeholder="พิมพ์เพิ่มเติม (ถ้ามี)" />
+            </label>
+          </fieldset>
+
+          <label className="pm-field">
+            <span>หมายเหตุ</span>
+            <textarea rows={3} value={note} onChange={(event) => setNote(event.target.value)} placeholder="เช่น ใช้ไม้เท้า ปวดเข่าข้างซ้าย หรือควรมีผู้ดูแลเดินประกบ" />
+          </label>
+
+          <p className="pm-medical-note">ข้อมูลนี้ใช้ประกอบการดูผลการเดินเท่านั้น ไม่ใช้แทนการประเมินหรือวินิจฉัยโดยบุคลากรทางการแพทย์</p>
+
+          <div className="pm-dialog__actions">
+            <button className="btn btn--ghost" type="button" onClick={onClose}>ยกเลิก</button>
+            <button className="btn btn--primary" type="submit" disabled={saving}>
+              {saving ? "กำลังบันทึก…" : "บันทึกผู้ทดสอบ"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}

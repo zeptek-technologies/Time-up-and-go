@@ -6,13 +6,23 @@ import PatientsSection from "./components/PatientsSection";
 import RecordsSection from "./components/RecordsSection";
 import DiseaseSection from "./components/DiseaseSection";
 import GuideSection from "./components/GuideSection";
+import LiveStatusPage from "./components/LiveStatusPage";
+import PatientManagementPage from "./components/PatientManagementPage";
 import PendingUploadsBanner from "./components/PendingUploadsBanner";
 import { useTugData } from "./hooks/useTugData";
 import "./app-shell.css";
 // Loaded last: owns the visual direction (see console.css header).
 import "./console.css";
+import "./patient-management.css";
 
 export default function App() {
+  const view = new URLSearchParams(window.location.search).get("view");
+  if (view === "live-status") return <LiveStatusPage />;
+  if (view === "patients") return <PatientManagementPage />;
+  return <DashboardApp />;
+}
+
+function DashboardApp() {
   const data = useTugData();
   const [activePatientId, setActivePatientId] = useState("");
   const [active, setActive] = useState<SectionKey>("overview");

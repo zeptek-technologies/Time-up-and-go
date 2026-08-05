@@ -11,7 +11,14 @@ function relTime(sec: number): string {
   if (sec < 5) return "เมื่อสักครู่";
   if (sec < 60) return `${Math.round(sec)} วินาทีที่แล้ว`;
   if (sec < 3600) return `${Math.round(sec / 60)} นาทีที่แล้ว`;
-  return `${Math.round(sec / 3600)} ชม.ที่แล้ว`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)} ชม.ที่แล้ว`;
+
+  const days = Math.floor(sec / 86400);
+  const hours = Math.floor((sec % 86400) / 3600);
+
+  return hours > 0
+    ? `${days} วัน ${hours} ชม.ที่แล้ว`
+    : `${days} วันที่แล้ว`;
 }
 
 const LABEL: Record<DeviceId, string> = {

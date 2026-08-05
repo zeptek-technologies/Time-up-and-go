@@ -68,6 +68,7 @@ export interface Patient {
   age: number | null;
   gender: string;
   note: string;
+  conditions: string[];
 }
 
 // One document = one TRIAL (not a whole session). Firmware v2 adds 9 fields on
@@ -130,6 +131,9 @@ export function subscribePatients(cb: (rows: Patient[]) => void, onError?: (e: E
           age: data.age ?? null,
           gender: data.gender ?? "",
           note: data.note ?? "",
+          conditions: Array.isArray(data.conditions)
+            ? data.conditions.filter((item): item is string => typeof item === "string")
+            : [],
         });
       });
       rows.sort((a, b) => a.name.localeCompare(b.name, "th"));
@@ -238,12 +242,16 @@ export interface DeviceStatus {
   trialNo: number;
   // checkpoint only
   chairOnline: boolean;
+  light: string; // สีไฟที่หลอดกำลังแสดงจริง: not_ready|ready|stand_up|walking|passed|result_*
+  chairState: string; // สถานะเก้าอี้ที่ checkpoint ได้ยินทาง ESP-NOW — เร็วกว่า device_status/chair
+  //                     ตลอดช่วง RETURNING เพราะช่วงนั้นเก้าอี้หยุดคุย Firestore ไม่ให้จับเวลาเพี้ยน
 }
 
 const EMPTY_DEVICE: DeviceStatus = {
   exists: false, lastSeen: 0, state: "", rssi: 0, fwVersion: "", uptimeSec: 0,
   checkpointOnline: false, pendingUploads: 0, armed: false,
   subjectKey: "", sessionId: "", trialNo: 0, chairOnline: false,
+  light: "", chairState: "",
 };
 
 export function subscribeDeviceStatus(
@@ -273,6 +281,8 @@ export function subscribeDeviceStatus(
         sessionId: d.session_id ?? "",
         trialNo: num(d.trial_no),
         chairOnline: d.chair_online === true,
+        light: d.light ?? "",
+        chairState: d.chair_state ?? "",
       });
     },
     (err) => onError?.(err),
@@ -310,13 +320,20 @@ export async function requestReset(): Promise<void> {
 }
 
 // ── Patient CRUD ──
-export async function addPatient(name: string, age: string, gender: string, note: string) {
+export async function addPatient(
+  name: string,
+  age: string,
+  gender: string,
+  note: string,
+  conditions: string[] = [],
+) {
   await ensureAuth();
   await addDoc(collection(db, "patients"), {
     name,
     age: age ? Number(age) : null,
     gender: gender || "",
     note: note || "",
+    conditions,
     created_at: serverTimestamp(),
   });
 }

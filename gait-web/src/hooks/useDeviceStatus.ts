@@ -32,7 +32,14 @@ export function useDeviceStatus(deviceId: DeviceId): DeviceView {
     let cancelled = false;
     setRaw(null); // reset when switching device
     ensureAuth().then((ok) => {
-      if (ok && !cancelled) unsub = subscribeDeviceStatus(deviceId, setRaw);
+      if (ok && !cancelled) {
+        // ต้องมี error handler เสมอ ไม่งั้น error จาก Firestore (เช่น permission-denied
+        // เพราะยังไม่ publish rules) จะเงียบสนิท แล้วหน้าจอค้างที่ "กำลังค้นหาอุปกรณ์"
+        // โดยไม่มีเบาะแสว่าเกิดอะไรขึ้น
+        unsub = subscribeDeviceStatus(deviceId, setRaw, (err) =>
+          console.error(`[DeviceStatus:${deviceId}]`, err.message),
+        );
+      }
     });
     return () => {
       cancelled = true;
@@ -54,6 +61,7 @@ export function useDeviceStatus(deviceId: DeviceId): DeviceView {
       exists: false, lastSeen: 0, state: "", rssi: 0, fwVersion: "", uptimeSec: 0,
       checkpointOnline: false, pendingUploads: 0, armed: false,
       subjectKey: "", sessionId: "", trialNo: 0, chairOnline: false,
+      light: "", chairState: "",
     }),
     online,
     known,

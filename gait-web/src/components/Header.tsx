@@ -48,6 +48,19 @@ export default function Header({ active, onNavigate }: Props) {
               {label}
             </button>
           ))}
+          <a className="app-nav__link app-nav__external" href="?view=patients">
+            จัดการผู้ทดสอบ <span aria-hidden="true">→</span>
+          </a>
+          <a
+            className="app-nav__link app-nav__external"
+            href="?view=live-status"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="เปิดจอแสดงสถานะในแท็บใหม่"
+          >
+            จอสถานะ ESP32 <span aria-hidden="true">↗</span>
+            <span className="sr-only"> เปิดในแท็บใหม่</span>
+          </a>
         </nav>
 
         <div className="app-header__status">

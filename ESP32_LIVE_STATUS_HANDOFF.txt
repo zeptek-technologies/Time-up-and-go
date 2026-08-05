@@ -1,0 +1,588 @@
+ESP32 LIVE STATUS — คู่มือแก้ไขโค้ด .ino
+โครงการ: TUG Care Board
+จัดทำสำหรับ: Developer ที่จะพัฒนา Firmware ESP32 ต่อ
+
+เอกสารนี้กล่าวถึงเฉพาะงานในโค้ด ESP32 เท่านั้น
+ยังไม่ให้แก้ไฟล์รุ่นเก่า และยังไม่ให้เปลี่ยนชื่อ field หรือค่า state จากที่กำหนด
+
+======================================================================
+1. ไฟล์ที่ต้องแก้
+======================================================================
+
+  ESP_Chair/ESP_Chair.ino
+  ESP_Checkpoint/ESP_Checkpoint.ino
+======================================================================
+2. เป้าหมายของ Firmware
+======================================================================
+
+Chair เป็นอุปกรณ์หลักของการทดสอบ ต้อง:
+
+  - จับเวลาการทดสอบ
+  - เปลี่ยนสถานะตามขั้นตอนจริง
+  - ส่งสถานะขึ้น Cloud Firestore ทันทีเมื่อสถานะเปลี่ยน
+  - ส่ง heartbeat ทุก 15 วินาที
+  - บันทึกผลเมื่อจบรอบ
+  - เก็บผลไว้ใน NVS เมื่ออินเทอร์เน็ตมีปัญหา
+  - ส่งคำสั่งไป Checkpoint ผ่าน ESP-NOW
+
+Checkpoint ต้อง:
+
+  - รอคำสั่ง START จาก Chair
+  - ตรวจจับเมื่อผู้ทดสอบเดินผ่าน
+  - ส่ง CHECKPOINT กลับไป Chair
+  - รับ FINISH แล้วแสดงสีไฟตามผล
+  - รับ ABORT แล้วกลับสู่สถานะพร้อมใช้งาน
+  - ส่ง heartbeat ของตัวเองขึ้น Cloud Firestore
+
+ข้อสำคัญ:
+
+  - ห้ามให้การส่งข้อมูลผ่าน HTTPS ทำให้เวลาทดสอบคลาดเคลื่อน
+  - ห้ามเรียก Firebase.Firestore.* ภายใน callback ของ ESP-NOW
+  - ชื่อ collection, document, field และ state ต้องตรงตามเอกสารทุกตัวอักษร
+
+
+======================================================================
+3. ข้อมูลที่ ESP_Chair_v2.ino ต้องเขียน
+======================================================================
+
+Document:
+
+  device_status/chair
+
+Field ที่ต้องเขียน:
+
+  online              boolean   true เมื่อบอร์ดทำงานและส่งข้อมูลสำเร็จ
+  last_seen           integer   Unix epoch หน่วยวินาทีจาก NTP
+  state               string    สถานะปัจจุบันของ Chair
+  rssi                integer   Wi-Fi RSSI หน่วย dBm
+  device              string    "chair"
+  fw_version          string    รุ่น firmware เช่น "chair-2.0.0"
+  uptime_sec          integer   เวลาหลังบูต หน่วยวินาที
+  checkpoint_online   boolean   ได้รับ ESP-NOW ACK จาก Checkpoint ภายในเวลาที่กำหนด
+  pending_uploads     integer   จำนวนผลที่ค้างอยู่ใน NVS
+  armed               boolean   พร้อมอนุญาตให้เริ่มทดสอบหรือไม่
+  subject_key         string    รหัสผู้ทดสอบ หรือ "unassigned"
+  session_id          string    รหัส session ปัจจุบัน
+  trial_no            integer   หมายเลขรอบถัดไป/รอบปัจจุบันตามกติกาข้อ 7
+
+ค่า state ที่อนุญาต:
+
+  CALIBRATE
+  WAIT_SIT
+  READY
+  RUNNING
+  RETURNING
+  COOLDOWN
+
+ห้ามส่งชื่ออื่น เช่น WALKING, FINISHED หรือ DONE
+
+กติกา last_seen:
+
+  - ใช้ Unix epoch หน่วยวินาที
+  - ห้ามใช้ millis()
+  - เวลาให้มาจาก NTP
+  - อัปเดตทุก heartbeat และทุกครั้งที่ publish state
+
+
+======================================================================
+4. ข้อมูลที่ ESP_Checkpoint_v2.ino ต้องเขียน
+======================================================================
+
+Document:
+
+  device_status/checkpoint
+
+Field ที่ต้องเขียน:
+
+  online        boolean   true เมื่อบอร์ดทำงานและส่งข้อมูลสำเร็จ
+  last_seen     integer   Unix epoch หน่วยวินาทีจาก NTP
+  state         string    สถานะปัจจุบันของ Checkpoint
+  rssi          integer   Wi-Fi RSSI หน่วย dBm
+  device        string    "checkpoint"
+  fw_version    string    รุ่น firmware เช่น "checkpoint-2.0.0"
+  uptime_sec    integer   เวลาหลังบูต หน่วยวินาที
+  chair_online  boolean   ได้รับ ESP-NOW ACK จาก Chair ภายในเวลาที่กำหนด
+
+ค่า state ที่อนุญาต:
+
+  IDLE
+  DETECTING
+  RESULT
+
+
+======================================================================
+5. ผลการทดสอบที่ ESP_Chair_v2.ino ต้องบันทึก
+======================================================================
+
+Collection:
+
+  tug_results
+
+Document ID แนะนำ:
+
+  <finished_at>_<trial_no>
+
+ตัวอย่าง:
+
+  tug_results/1785480123_4
+
+Field:
+
+  subject_key      string    รหัสผู้ทดสอบ
+  session_id       string    รหัส session
+  trial_no         integer   หมายเลขรอบที่เพิ่งจบ
+  checkpoint_sec   double    เวลาจากเริ่มจนถึง Checkpoint
+  return_sec       double    เวลาจาก Checkpoint จนกลับมานั่ง
+  total_sec        double    เวลารวม
+  risk_level       string    LOW, MODERATE หรือ HIGH
+  status           string    completed หรือ aborted
+  started_at       integer   Unix epoch วินาที
+  finished_at      integer   Unix epoch วินาที
+  device           string    "chair"
+  fw_version       string    รุ่น firmware
+
+เกณฑ์ risk_level:
+
+  total_sec <= 11.00                = LOW
+  total_sec > 11.00 และ <= 30.00    = MODERATE
+  total_sec > 30.00                 = HIGH
+
+กติกา:
+
+  - Chair เป็นผู้เขียน tug_results เพียงอุปกรณ์เดียว
+  - Checkpoint ห้ามเขียนผลซ้ำ
+  - จบรอบปกติใช้ status = "completed"
+  - ยกเลิกหรือหมดเวลาใช้ status = "aborted"
+  - ผล aborted ไม่ต้องนำไปตัดสินผ่าน/ไม่ผ่าน
+
+
+======================================================================
+6. งานที่ต้องแก้ใน ESP_Chair_v2.ino
+======================================================================
+
+6.1 ส่ง state ทันทีโดยไม่บล็อกการจับเวลา
+----------------------------------------------------------------------
+
+ปัจจุบัน heartbeat ส่งทุก 15 วินาที ถ้าเปลี่ยน state หลัง heartbeat เพิ่งส่ง
+ข้อมูลอาจช้าถึง 15 วินาที จึงต้องเพิ่ม event queue แยกจาก loop จับเวลา
+
+ชื่อที่แนะนำ:
+
+  QueueHandle_t liveStatusQueue;
+  TaskHandle_t firebaseWorkerTask;
+  SemaphoreHandle_t firebaseMutex;
+
+โครงสร้างที่แนะนำ:
+
+  struct LiveStatusEvent {
+    SystemState state;
+    uint32_t stateSeq;
+    uint32_t queuedAtMs;
+    uint16_t trialNo;
+    bool armed;
+    bool checkpointOnline;
+    char subjectKey[32];
+    char sessionId[40];
+  };
+
+ฟังก์ชันที่ควรเพิ่ม:
+
+  void queueLiveStatus(SystemState state);
+  void firebaseWorker(void* parameter);
+  bool publishChairStatus(const LiveStatusEvent& event);
+
+หลักการ:
+
+  - state machine เปลี่ยน state แล้วใส่ event ลง queue เท่านั้น
+  - queueLiveStatus() ต้องไม่เรียก network
+  - Firebase worker เป็นผู้ patch device_status/chair
+  - ใช้ queue อย่างน้อย 8 รายการ
+  - ห้ามใช้ overwrite queue เพราะ state ระหว่างทางอาจหาย
+  - รักษาลำดับ READY -> RUNNING -> RETURNING -> COOLDOWN
+  - Firebase client ห้ามถูกเรียกพร้อมกันจากหลาย task
+
+6.2 จุดที่ต้องเรียก queueLiveStatus()
+----------------------------------------------------------------------
+
+เรียกหลังเปลี่ยน state และตั้งค่าที่เกี่ยวข้องครบแล้ว:
+
+  1) เริ่มบูตและ NTP/Firebase พร้อม
+     -> CALIBRATE
+
+  2) จบ calibration
+     -> READY ถ้ามีคนนั่ง
+     -> WAIT_SIT ถ้ายังไม่มีคนนั่ง
+
+  3) ตรวจพบว่าผู้ทดสอบนั่ง
+     WAIT_SIT -> READY
+
+  4) ตรวจพบว่าผู้ทดสอบลุก
+     READY -> RUNNING
+
+     ก่อน queue ต้องตั้งค่า:
+       startTime
+       checkpointTime = 0
+       currentRunId++
+       testStartEpoch
+
+     จากนั้นส่ง:
+       sendCommand("START", 0.0)
+
+  5) ได้รับ CHECKPOINT ที่ runId ตรงกัน
+     RUNNING -> RETURNING
+
+     ลำดับ:
+       checkpointTime = millis() - startTime
+       currentState = STATE_RETURNING
+       queueLiveStatus(STATE_RETURNING)
+
+     ห้ามเรียก Firestore ใน OnDataRecv()
+
+  6) ผู้ทดสอบกลับมานั่งและจบรอบ
+     RETURNING -> COOLDOWN
+
+     ต้องบันทึกผล completed ให้เรียบร้อย แล้ว queue COOLDOWN
+
+  7) cooldown ครบ
+     COOLDOWN -> WAIT_SIT
+
+  8) subject_key, session_id หรือ armed เปลี่ยน
+     ให้ queue สถานะเดิมซ้ำเพื่ออัปเดต metadata
+
+  9) checkpoint_online เปลี่ยน
+     ให้ queue สถานะใหม่ทันที
+
+6.3 รักษาความแม่นยำของเวลา
+----------------------------------------------------------------------
+
+ห้ามเรียก HTTPS แบบ blocking ในช่วง:
+
+  - STATE_RETURNING
+  - callback OnDataRecv()
+  - จังหวะตรวจว่าผู้ทดสอบลุก
+  - จังหวะตรวจว่าผู้ทดสอบกลับมานั่ง
+
+Firebase worker ต้องแยกจาก loop ที่อ่าน ultrasonic
+หาก Firebase ช้า การจับเวลาและ ESP-NOW ต้องยังทำงานต่อได้
+
+6.4 Heartbeat
+----------------------------------------------------------------------
+
+คง HEARTBEAT_INTERVAL_MS = 15000
+
+Heartbeat ต้อง patch device_status/chair เพื่ออัปเดต:
+
+  online
+  last_seen
+  state
+  rssi
+  uptime_sec
+  checkpoint_online
+  pending_uploads
+  armed
+  subject_key
+  session_id
+  trial_no
+
+ใช้ patchDocument พร้อม update mask
+ห้าม set ทับ document ทั้งก้อนด้วย payload ที่ field ไม่ครบ
+
+6.5 การยกเลิกและ Timeout
+----------------------------------------------------------------------
+
+เมื่อยกเลิกหรือ timeout:
+
+  1) ส่ง sendCommand("ABORT", 0.0) ไป Checkpoint
+  2) บันทึก tug_results โดย status = "aborted"
+  3) หยุดจับเวลาและล้างสถานะของรอบนั้น
+  4) กลับ WAIT_SIT หรือ state ที่พร้อมเริ่มรอบใหม่
+  5) queue สถานะใหม่ทันที
+
+ไม่ควรใช้ COOLDOWN แทนผล completed หากรอบนั้น aborted
+
+6.6 session_id และ trial_no
+----------------------------------------------------------------------
+
+  - session_id ต้องไม่ว่างและต้องไม่ซ้ำข้าม session
+  - รูปแบบแนะนำ: session_<epoch> หรือ UUID แบบย่อ
+  - เมื่อ session_id เปลี่ยน ให้ตั้ง trialNo = 1
+  - subject_key ใช้ "unassigned" ได้ถ้ายังไม่เลือกผู้ทดสอบ
+  - ตอนจบรอบ ให้บันทึกผลด้วย trial_no ปัจจุบันก่อน
+  - เพิ่ม trialNo หลังสร้างหรือเก็บผลลง pending buffer สำเร็จ
+  - ห้ามเพิ่ม trialNo ซ้ำเมื่อ retry upload
+
+
+======================================================================
+7. งานที่ต้องแก้ใน ESP_Checkpoint_v2.ino
+======================================================================
+
+7.1 Heartbeat
+----------------------------------------------------------------------
+
+คง heartbeat ทุก 15 วินาที และ patch:
+
+  device_status/checkpoint
+
+ระหว่าง CP_DETECTING ห้ามคุย Firestore เพราะ HTTPS อาจทำให้พลาดการตรวจจับ
+ต้องคง guard ลักษณะนี้ไว้:
+
+  if (currentState != CP_DETECTING) {
+    // งาน Firestore
+  }
+
+หลังออกจาก CP_DETECTING ให้ queue หรือกำหนด flag เพื่อ publish ทันที
+แต่ต้องทำจาก loop/task ที่ปลอดภัย ไม่ใช่ ESP-NOW callback
+
+7.2 เมื่อได้รับ START
+----------------------------------------------------------------------
+
+ลำดับที่ต้องทำ:
+
+  1) ตรวจ len == sizeof(struct_message)
+  2) ตรวจ command == "START"
+  3) currentRunId = in.runId
+  4) currentState = CP_DETECTING
+  5) debounceActive = false
+  6) detectStart = millis()
+  7) ปิดไฟผลลัพธ์เดิม
+
+ห้ามเรียก Firebase จาก OnDataRecv()
+
+7.3 เมื่อตรวจพบผู้ทดสอบ
+----------------------------------------------------------------------
+
+เมื่อ debounce ครบ:
+
+  1) ส่ง sendCommand("CHECKPOINT", 0.0)
+  2) แนบ currentRunId เดิม
+  3) เพิ่มระบบ retry ถ้าส่งไม่สำเร็จ
+  4) หยุด retry เมื่อได้รับ FINISH หรือ ABORT
+
+อย่าเปลี่ยนเป็น IDLE ก่อนจัดคิวส่ง CHECKPOINT สำเร็จ
+ถ้า packet แรกหาย ต้องส่งซ้ำด้วย runId เดิม
+
+7.4 เมื่อได้รับ FINISH
+----------------------------------------------------------------------
+
+ลำดับ:
+
+  1) ตรวจ runId ให้ตรงกับรอบปัจจุบัน
+  2) รับ total_sec จาก in.timeSec
+  3) currentState = CP_RESULT
+  4) lastResultSec = in.timeSec
+  5) resultStart = millis()
+  6) คำนวณระดับผลด้วยเกณฑ์ 11 และ 30 วินาที
+  7) แสดงไฟ:
+
+       LOW      = เขียวค้าง
+       MODERATE = เหลืองค้าง
+       HIGH     = แดงค้าง
+
+  8) ตั้ง flag เพื่อ publish state เมื่อกลับสู่ loop ที่ปลอดภัย
+
+Checkpoint ไม่ต้องเขียน tug_results
+
+7.5 เมื่อได้รับ ABORT
+----------------------------------------------------------------------
+
+ต้อง:
+
+  currentState = CP_IDLE
+  debounceActive = false
+  ยกเลิก retry CHECKPOINT ของ runId เดิม
+  ล้างค่าผลของรอบเดิม
+  แสดงไฟพร้อมใช้งาน
+  ตั้ง flag เพื่อ publish state เมื่อปลอดภัย
+
+7.6 Timeout ฝั่ง Checkpoint
+----------------------------------------------------------------------
+
+ถ้าอยู่ CP_DETECTING นานเกินเพดานที่กำหนดโดยไม่ได้ FINISH หรือ ABORT:
+
+  - หยุดตรวจจับรอบเดิม
+  - ยกเลิก retry
+  - กลับ CP_IDLE
+  - แสดงไฟพร้อมใช้งาน
+  - publish state เมื่อปลอดภัย
+
+เพดานเวลานี้ใช้กัน Checkpoint ค้างเมื่อ Chair ดับหรือ packet ABORT หาย
+
+
+======================================================================
+8. ESP-NOW CONTRACT ที่ต้องตรงกันทั้งสองไฟล์
+======================================================================
+
+struct_message ต้องมีชนิดและขนาดตรงกันทั้งสองบอร์ด:
+
+  command
+  timeSec
+  runId
+
+ต้องตรวจ:
+
+  - sizeof(struct_message) เท่ากัน
+  - ขนาด char array ของ command เท่ากัน
+  - ชนิด timeSec เท่ากัน
+  - ชนิด runId เท่ากัน
+  - หลัง memcpy ให้ปิดท้าย command ด้วย '\0'
+  - callback ต้องตรวจ len ก่อนอ่านข้อมูล
+
+ทิศทางข้อความ:
+
+  Chair -> Checkpoint:
+    PING
+    START
+    FINISH
+    ABORT
+
+  Checkpoint -> Chair:
+    CHECKPOINT
+
+กติกา runId:
+
+  - Chair เพิ่ม currentRunId เมื่อเริ่มรอบใหม่
+  - START แนบ currentRunId
+  - Checkpoint จำ runId จาก START
+  - CHECKPOINT ตอบกลับด้วย runId เดิม
+  - Chair ทิ้ง CHECKPOINT ที่ runId ไม่ตรง
+  - FINISH และ ABORT ควรแนบ runId ของรอบที่กำลังทำ
+
+
+======================================================================
+9. การใช้ Firebase อย่างปลอดภัย
+======================================================================
+
+Firebase operation ทั้งหมดต้องถูก serialize:
+
+  sendHeartbeat()
+  publishChairStatus()
+  uploadResult()
+  flushPending()
+  checkCommands()
+  checkResetCommand()
+
+แนวทางที่แนะนำ:
+
+  - ใช้ Firebase worker เพียง task เดียว
+
+หรือ:
+
+  - ใช้ firebaseMutex ตัวเดียวครอบทุก Firebase operation
+
+ถึงมี mutex ก็ยังห้ามเรียก HTTPS จาก timing-critical path
+เพราะ mutex ป้องกันการชนกัน แต่ไม่ป้องกัน loop ถูก block
+
+เมื่ออินเทอร์เน็ตหรือ Firebase ช้า:
+
+  - ultrasonic sampling ต้องไม่หยุด
+  - checkpointTime ต้องไม่เลื่อน
+  - เวลาตรวจจับนั่งลงต้องไม่เลื่อน
+  - ผลที่ส่งไม่สำเร็จต้องเข้า pending buffer ใน NVS
+  - เมื่อออนไลน์อีกครั้งให้ retry โดยไม่สร้างผลซ้ำ
+
+
+======================================================================
+10. ข้อมูลรับรองและคำสั่งจาก Firestore
+======================================================================
+
+Firmware ต้องมีค่าต่อไปนี้:
+
+  FIREBASE_API_KEY
+  FIREBASE_PROJECT_ID
+  USER_EMAIL
+  USER_PASSWORD
+
+ห้ามเพิ่ม credential จริงลงไฟล์ใหม่หรือ log ผ่าน Serial
+
+ถ้า firmware รองรับคำสั่ง ให้ Chair อ่าน:
+
+  device_commands/chair
+
+Field:
+
+  subject_key
+  session_id
+  start_requested_at
+  start_handled_at
+  abort_requested_at
+  abort_handled_at
+  reset_requested_at
+  reset_handled_at
+
+กติกา:
+
+  requested_at > handled_at หมายถึงมีคำสั่งใหม่
+
+ต้องเขียน handled_at ให้สำเร็จก่อนทำ side effect ที่ย้อนกลับไม่ได้
+โดยเฉพาะ reset ต้องเขียน reset_handled_at ก่อน ESP.restart()
+
+
+======================================================================
+11. Log ที่ควรเพิ่ม
+======================================================================
+
+Chair:
+
+  [LIVE] queued state=RUNNING seq=12 session=session_abc trial=4
+  [LIVE] published state=RUNNING seq=12 latency_ms=...
+  [LIVE] queued state=RETURNING seq=13 checkpoint_sec=...
+  [RESULT] saved session=session_abc trial=4 total_sec=...
+  [RESULT] buffered session=session_abc trial=4 reason=...
+  [ESPNOW] ignored CHECKPOINT run_id=... expected=...
+
+Checkpoint:
+
+  [CP] START run_id=...
+  [CP] CHECKPOINT queued run_id=... attempt=1
+  [CP] CHECKPOINT retry run_id=... attempt=2
+  [CP] FINISH run_id=... total_sec=... risk=...
+  [CP] ABORT run_id=...
+
+ห้ามพิมพ์:
+
+  USER_PASSWORD
+  token
+  API response ที่มี credential
+
+
+======================================================================
+12. Checklist ทดสอบ Firmware
+======================================================================
+
+[ ] Chair เปลี่ยน CALIBRATE -> READY/WAIT_SIT ถูกต้อง
+[ ] ลุกจากเก้าอี้แล้ว Chair เปลี่ยนเป็น RUNNING
+[ ] Checkpoint รับ START พร้อม runId ที่ถูกต้อง
+[ ] เดินผ่านแล้ว Checkpoint ส่ง CHECKPOINT
+[ ] Chair รับ CHECKPOINT แล้วเปลี่ยนเป็น RETURNING เพียงครั้งเดียว
+[ ] กลับมานั่งแล้ว Chair บันทึก completed และเปลี่ยนเป็น COOLDOWN
+[ ] total_sec = checkpoint_sec + return_sec ภายในค่าคลาดเคลื่อนที่ยอมรับได้
+[ ] 11.00 วินาทีได้ LOW
+[ ] 11.01 วินาทีได้ MODERATE
+[ ] 30.00 วินาทีได้ MODERATE
+[ ] 30.01 วินาทีได้ HIGH
+[ ] ปิดอินเทอร์เน็ตแล้วการจับเวลายังถูกต้อง
+[ ] ผลที่ส่งไม่ได้ถูกเก็บใน NVS และส่งซ้ำได้
+[ ] การ retry ไม่สร้าง tug_results ซ้ำ
+[ ] ทำ packet CHECKPOINT แรกหายแล้วระบบ retry ได้
+[ ] runId เก่าถูกทิ้ง
+[ ] Timeout ก่อนถึง Checkpoint ทำให้ทั้งสองบอร์ดกลับพร้อมใช้งาน
+[ ] ABORT ทำให้ Checkpoint หยุดตรวจจับและกลับ IDLE
+[ ] Chair และ Checkpoint ส่ง heartbeat ทุก 15 วินาทีเมื่ออยู่ในช่วงปลอดภัย
+[ ] ไม่มี Firebase call ใน OnDataRecv()
+[ ] ไม่มี HTTPS blocking ในช่วงจับเวลาสำคัญ
+
+
+======================================================================
+13. Definition of Done
+======================================================================
+
+งาน Firmware ถือว่าเสร็จเมื่อ:
+
+  1) Chair ส่งทุก state ตามชื่อที่กำหนด
+  2) state สำคัญถูก queue ทันที ไม่ต้องรอ heartbeat
+  3) การส่ง Firestore ไม่ทำให้เวลาทดสอบคลาดเคลื่อน
+  4) Checkpoint ส่ง CHECKPOINT แบบมี runId และ retry ได้
+  5) Chair บันทึก completed/aborted ถูกต้อง
+  6) ผลค้างใน NVS ส่งซ้ำได้โดยไม่เกิดข้อมูลซ้ำ
+  7) ABORT, timeout, Wi-Fi หลุด และ Firebase ช้าถูกทดสอบแล้ว
+  8) ทั้งสองไฟล์คอมไพล์ผ่านบน ESP32 core และ library version ที่ใช้งานจริง
