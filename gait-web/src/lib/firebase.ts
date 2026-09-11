@@ -87,7 +87,10 @@ export interface TugResult {
   sessionId: string;
   trialNo: number;
   fwVersion: string;
-  patientId: string; // legacy: manual web-side assignment
+  // Explicit web-side assignment, or subject_key when the ESP32 created the
+  // result. The firmware intentionally stores the patient document id in
+  // subject_key and does not write patient_id.
+  patientId: string;
 }
 
 export interface GaitAssessment {
@@ -99,6 +102,10 @@ export interface GaitAssessment {
   timestamp: string;
   timestampRaw: unknown;
   patientId: string;
+  // Which TUG trial this walk belongs to. Empty / 0 on records written before
+  // the camera was driven by the chair — those can only be matched by time.
+  sessionId: string;
+  trialNo: number;
   // Camera gait metrics. null on records written before step counting existed.
   stepCount: number | null;
   cadenceAvg: number | null;
@@ -150,6 +157,14 @@ export function subscribeResults(cb: (rows: TugResult[]) => void, onError?: (e: 
       const rows: TugResult[] = [];
       snap.forEach((d) => {
         const data = d.data() as DocumentData;
+        const subjectKey = typeof data.subject_key === "string" ? data.subject_key : "";
+        // Results created by the chair contain subject_key but no patient_id.
+        // subject_key is the pseudonymous Firestore patient document id, so use
+        // it as the relation unless patient_id exists (including an intentional
+        // empty string written when staff manually unassign a legacy result).
+        const patientId = typeof data.patient_id === "string"
+          ? data.patient_id
+          : (subjectKey && subjectKey !== "unassigned" ? subjectKey : "");
         rows.push({
           id: d.id,
           checkpointSec: num(data.checkpoint_sec),
@@ -162,11 +177,11 @@ export function subscribeResults(cb: (rows: TugResult[]) => void, onError?: (e: 
           status: data.status === "aborted" ? "aborted" : "completed",
           startedAt: num(data.started_at),
           finishedAt: num(data.finished_at),
-          subjectKey: data.subject_key ?? "",
+          subjectKey,
           sessionId: data.session_id ?? "",
           trialNo: num(data.trial_no),
           fwVersion: data.fw_version ?? "",
-          patientId: data.patient_id ?? "",
+          patientId,
         });
       });
       // Newest first by real wall-clock time. The old sort parsed the doc ID,
@@ -203,6 +218,8 @@ export function subscribeGaitAssessments(
           timestamp: data.timestamp ?? "",
           timestampRaw: data.timestamp,
           patientId: data.patient_id ?? "",
+          sessionId: data.session_id ?? "",
+          trialNo: num(data.trial_no),
           stepCount: numOrNull(data.step_count),
           cadenceAvg: numOrNull(data.cadence_avg),
           stepTimeCvAvg: numOrNull(data.step_time_cv_avg),
@@ -319,6 +336,72 @@ export async function requestReset(): Promise<void> {
   await setDoc(doc(db, "device_commands", "chair"), { reset_requested_at: nowSec }, { merge: true });
 }
 
+// ── Who is being tested right now ──
+// The camera tab and the live-status screen are separate pages (often separate
+// devices), so "the selected subject" cannot live in React state — it has to
+// travel through Firestore.
+//
+// It rides on device_commands/chair rather than a new collection because the
+// board ALREADY reads subject_key and session_id from there (see checkCommands()
+// in ESP_Chair_v2.ino). Writing them here means the board stamps tug_results
+// with the same subject on its own — no firmware change, no new rules needed.
+// patient_id / patient_name are extra fields the board simply ignores.
+export interface ActiveSubject {
+  patientId: string;
+  patientName: string;
+  sessionId: string;
+}
+
+const NO_SUBJECT: ActiveSubject = { patientId: "", patientName: "", sessionId: "" };
+
+export function subscribeActiveSubject(
+  cb: (s: ActiveSubject) => void,
+  onError?: (e: Error) => void,
+) {
+  return onSnapshot(
+    doc(db, "device_commands", "chair"),
+    (snap) => {
+      const d = (snap.data() as DocumentData) ?? {};
+      cb({
+        patientId: d.patient_id ?? "",
+        patientName: d.patient_name ?? "",
+        sessionId: d.session_id ?? "",
+      });
+    },
+    (err) => onError?.(err),
+  );
+}
+
+/**
+ * Announce which subject the next trials belong to. Returns the new session id.
+ *
+ * ⚠️ Every call starts a NEW session, and the board resets trial_no to 1 whenever
+ * session_id changes — so call this on an actual staff selection, never on every
+ * render, and never mid-session.
+ */
+export async function setActiveSubject(patientId: string, patientName = ""): Promise<ActiveSubject> {
+  await ensureAuth();
+  const nowSec = Math.floor(Date.now() / 1000);
+  // The board stores these in char[32], so keep them short. Firestore auto-ids
+  // are 20 chars and "session_<10-digit epoch>" is 18 — both fit with room spare.
+  const next: ActiveSubject = patientId
+    ? { patientId, patientName, sessionId: `session_${nowSec}` }
+    : NO_SUBJECT;
+
+  await setDoc(
+    doc(db, "device_commands", "chair"),
+    {
+      subject_key: patientId || "unassigned",
+      session_id: next.sessionId || "unassigned",
+      patient_id: next.patientId,
+      patient_name: next.patientName,
+      subject_set_at: nowSec,
+    },
+    { merge: true },
+  );
+  return next;
+}
+
 // ── Patient CRUD ──
 export async function addPatient(
   name: string,
@@ -335,6 +418,29 @@ export async function addPatient(
     note: note || "",
     conditions,
     created_at: serverTimestamp(),
+  });
+}
+
+/** ฟิลด์ที่แก้ได้จากหน้าจัดการผู้ทดสอบ (id/created_at แก้ไม่ได้) */
+export interface PatientEdit {
+  name: string;
+  age: string;
+  gender: string;
+  note: string;
+  conditions: string[];
+}
+
+// แก้ทะเบียนเดิมแทนการลบแล้วสร้างใหม่ — deletePatient() ตัด patient_id ของผลเก่า
+// ทิ้งทั้งหมด การ "แก้ด้วยการสร้างใหม่" จึงเท่ากับทำประวัติหาย
+export async function updatePatient(id: string, fields: PatientEdit) {
+  await ensureAuth();
+  await updateDoc(doc(db, "patients", id), {
+    name: fields.name,
+    age: fields.age ? Number(fields.age) : null,
+    gender: fields.gender,
+    note: fields.note,
+    conditions: fields.conditions,
+    updated_at: serverTimestamp(),
   });
 }
 
@@ -363,11 +469,19 @@ export interface UploadOutcome {
   documentId: string | null;
 }
 
+export interface AssessmentContext {
+  patientId?: string;
+  cameraMode?: "front" | "front+side";
+  /** TUG trial this walk belongs to — captured when the chair said RUNNING. */
+  sessionId?: string;
+  trialNo?: number;
+}
+
 export async function uploadAssessment(
   recorder: GaitSessionRecorder,
-  patientId = "",
-  cameraMode: "front" | "front+side" = "front",
+  ctx: AssessmentContext = {},
 ): Promise<UploadOutcome> {
+  const { patientId = "", cameraMode = "front", sessionId = "", trialNo = 0 } = ctx;
   const { highestRisk, riskPercentage } = recorder.result();
   const round1 = (n: number) => (Number.isFinite(n) ? Math.round(n * 10) / 10 : null);
   const payload = {
@@ -387,6 +501,10 @@ export async function uploadAssessment(
     // by both cameras (see recorder.recordFused).
     camera_mode: cameraMode,
     patient_id: patientId,
+    // Ties this walk to one TUG trial so the live screen can show the time and
+    // the gait reading from the SAME round instead of guessing by timestamp.
+    session_id: sessionId,
+    trial_no: trialNo,
     source: "web",
   };
   try {

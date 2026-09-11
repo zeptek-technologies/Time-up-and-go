@@ -1,11 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
+import DeviceStatusChip from "./DeviceStatusChip";
 import { useDeviceStatus } from "../hooks/useDeviceStatus";
 import {
   ensureAuth,
+  subscribeActiveSubject,
+  subscribeGaitAssessments,
+  subscribePatients,
   subscribeResults,
+  type ActiveSubject,
+  type GaitAssessment,
+  type Patient,
   type TugResult,
 } from "../lib/firebase";
-import { effectiveChairState } from "../lib/liveStage";
+import { storedGaitLabel } from "../lib/classifier";
+import { conditionLabel } from "../lib/conditions";
+import { assessmentForTrial, effectiveChairState, resultForCurrentTrial } from "../lib/liveStage";
+import { getDiseaseMeta } from "../lib/meta";
+import { assessConsistency } from "../lib/riskContext";
 import { riskLevelOf, type RiskLevel } from "../lib/tugRisk";
 import "../live-status.css";
 
@@ -131,30 +142,17 @@ function stageFrom(state: string, known: boolean, online: boolean): Stage {
   }
 }
 
-function resultForCurrentTrial(
-  results: TugResult[],
-  sessionId: string,
-  nextTrialNo: number,
-): TugResult | null {
-  if (!sessionId || nextTrialNo < 2) return null;
-  return (
-    results.find(
-      (result) =>
-        result.status === "completed" &&
-        result.sessionId === sessionId &&
-        result.trialNo === nextTrialNo - 1,
-    ) ?? null
-  );
-}
-
 export default function LiveStatusPage() {
   const chair = useDeviceStatus("chair");
   const checkpoint = useDeviceStatus("checkpoint");
   const [results, setResults] = useState<TugResult[]>([]);
+  const [assessments, setAssessments] = useState<GaitAssessment[]>([]);
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [subject, setSubject] = useState<ActiveSubject>({ patientId: "", patientName: "", sessionId: "" });
   const [resultConnection, setResultConnection] = useState<"pending" | "online" | "error">("pending");
 
   useEffect(() => {
-    let unsubscribe = () => {};
+    const unsubs: Array<() => void> = [];
     let cancelled = false;
 
     ensureAuth().then((ok) => {
@@ -163,18 +161,25 @@ export default function LiveStatusPage() {
         setResultConnection("error");
         return;
       }
-      unsubscribe = subscribeResults(
-        (rows) => {
-          setResults(rows);
-          setResultConnection("online");
-        },
-        () => setResultConnection("error"),
+      unsubs.push(
+        subscribeResults(
+          (rows) => {
+            setResults(rows);
+            setResultConnection("online");
+          },
+          () => setResultConnection("error"),
+        ),
+        // ผลกล้อง + โรคประจำตัว: หน้านี้เป็นคนละเพจกับแท็บกล้อง จึงรับทุกอย่างผ่าน
+        // Firestore เหมือนกันหมด ไม่มี state ที่แชร์กันได้ตรง ๆ
+        subscribeGaitAssessments(setAssessments, (e) => console.error("[Assessments]", e.message)),
+        subscribePatients(setPatients, (e) => console.error("[Patients]", e.message)),
+        subscribeActiveSubject(setSubject, (e) => console.error("[ActiveSubject]", e.message)),
       );
     });
 
     return () => {
       cancelled = true;
-      unsubscribe();
+      unsubs.forEach((fn) => fn());
     };
   }, []);
 
@@ -186,8 +191,25 @@ export default function LiveStatusPage() {
   );
   const risk = result ? riskLevelOf(result.totalSec) : null;
   const passed = risk === "LOW";
-  const checkpointConnected =
-    chair.online && (chair.checkpointOnline || checkpoint.online || liveChairState === "RUNNING");
+
+  // ผลกล้องของรอบเดียวกัน + โรคประจำตัวของคนที่เจ้าหน้าที่เลือกไว้บนแดชบอร์ด
+  const assessment = useMemo(() => assessmentForTrial(assessments, result), [assessments, result]);
+  const patient = useMemo(
+    () => patients.find((p) => p.id === (result?.patientId || subject.patientId)) ?? null,
+    [patients, result, subject.patientId],
+  );
+  // ยึด identity เดิมไว้ ไม่งั้น array ใหม่ทุก render จะทำให้ useMemo ข้างล่างไม่มีผล
+  const conditions = useMemo(() => patient?.conditions ?? [], [patient]);
+
+  // null = รอบนั้นไม่มีผลกล้องที่ใช้ได้ (ไม่มีเอกสาร หรือเป็นเอกสาร "No Data")
+  const cameraLabel = assessment ? storedGaitLabel(assessment.condition) : null;
+  // recorder จะรายงาน "Normal" เมื่อไม่มีรูปแบบผิดปกติใดผ่านเกณฑ์ RISK_MIN_SHARE
+  // ดังนั้น flagged = ป้ายที่ได้ไม่ใช่ Normal
+  const cameraFlagged = cameraLabel !== null && cameraLabel !== "Normal";
+  const consistency = useMemo(
+    () => assessConsistency(cameraLabel, cameraFlagged, conditions),
+    [cameraLabel, cameraFlagged, conditions],
+  );
 
   return (
     <main className={`live-page live-page--${stage.key}`}>
@@ -205,13 +227,12 @@ export default function LiveStatusPage() {
           </span>
         </a>
 
+        {/* ใช้การ์ดตัวเดียวกับหน้าหลัก เพื่อให้ชื่อบอร์ด สถานะ และเวลาที่อัปเดตล่าสุด
+            ตรงกันทั้งสองหน้า — รวมถึงสถานะ "กำลังทดสอบ" ของจุดหมุนตัว ที่หน้านี้เคย
+            แสดงเป็น "ไม่เชื่อมต่อ" ทั้งที่เป็นพฤติกรรมปกติของบอร์ดระหว่างจับเวลา */}
         <div className="live-links" aria-label="สถานะการเชื่อมต่อ">
-          <span className={`live-link ${chair.online ? "live-link--online" : "live-link--offline"}`}>
-            <i aria-hidden="true" /> ESP32 {chair.online ? "ออนไลน์" : "ออฟไลน์"}
-          </span>
-          <span className={`live-link ${checkpointConnected ? "live-link--online" : "live-link--offline"}`}>
-            <i aria-hidden="true" /> Checkpoint {checkpointConnected ? "เชื่อมต่อแล้ว" : "ไม่เชื่อมต่อ"}
-          </span>
+          <DeviceStatusChip deviceId="chair" />
+          <DeviceStatusChip deviceId="checkpoint" />
         </div>
       </header>
 
@@ -271,6 +292,69 @@ export default function LiveStatusPage() {
               <p>กรุณารอสักครู่ ไม่ต้องเริ่มรอบใหม่</p>
             </div>
           )}
+        </section>
+      )}
+
+      {/* สามแหล่งข้อมูลวางไว้ข้างกัน ไม่ยุบเป็นคะแนนเดียว — การรวมประวัติโรคเข้ากับ
+          ผลวัดให้เป็นระดับความเสี่ยงตัวเดียวคือการตัดสินทางคลินิก ที่ทำได้คือบอกว่า
+          สองแหล่งสอดคล้องกันไหม แล้วให้เจ้าหน้าที่เป็นคนตัดสิน */}
+      {stage.key === "complete" && result && (
+        <section className="live-detail" aria-live="polite">
+          <article className="live-detail__card">
+            <span className="live-detail__label">ผู้ทดสอบ</span>
+            <strong>{patient?.name ?? subject.patientName ?? "ไม่ระบุ"}</strong>
+            <p>
+              {result.trialNo ? `รอบที่ ${result.trialNo}` : "—"}
+              {result.checkpointSec > 0 && ` · ขาไป ${result.checkpointSec.toFixed(1)} วิ`}
+              {result.returnSec > 0 && ` · ขากลับ ${result.returnSec.toFixed(1)} วิ`}
+            </p>
+          </article>
+
+          <article className="live-detail__card">
+            <span className="live-detail__label">กล้องวิเคราะห์ท่าเดิน</span>
+            {assessment && cameraLabel ? (
+              <>
+                <strong>{getDiseaseMeta(cameraLabel).th}</strong>
+                <p>
+                  {cameraFlagged ? `พบใน ${assessment.confidence.toFixed(0)}% ของช่วงที่วิเคราะห์ได้` : "ไม่พบรูปแบบผิดปกติที่ชัดเจน"}
+                  {assessment.stepCount !== null && ` · ${assessment.stepCount} ก้าว`}
+                </p>
+              </>
+            ) : (
+              <>
+                <strong className="live-detail__muted">ไม่มีผล</strong>
+                <p>
+                  {assessment
+                    ? "กล้องบันทึกรอบนี้ไว้ แต่จับท่าเดินไม่ได้ (ผู้ทดสอบอาจอยู่นอกเฟรม)"
+                    : "รอบนี้กล้องไม่ได้บันทึก (ยังไม่ได้เปิดกล้อง หรือเปิดหลังผู้ทดสอบลุกแล้ว)"}
+                </p>
+              </>
+            )}
+          </article>
+
+          <article className="live-detail__card">
+            <span className="live-detail__label">โรคประจำตัวที่บันทึกไว้</span>
+            {conditions.length > 0 ? (
+              <ul className="live-detail__tags">
+                {conditions.map((id) => (
+                  <li key={id} className={consistency.matched.includes(id) ? "is-matched" : ""}>
+                    {conditionLabel(id)}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <>
+                <strong className="live-detail__muted">ไม่มีบันทึก</strong>
+                <p>เพิ่มได้ที่หน้าจัดการผู้ทดสอบ เพื่อให้อ่านผลได้ตรงบริบทมากขึ้น</p>
+              </>
+            )}
+          </article>
+
+          <article className={`live-verdict live-verdict--${consistency.key}`}>
+            <span className="live-detail__label">สรุปความสอดคล้อง</span>
+            <strong>{consistency.headline}</strong>
+            <p>{consistency.detail}</p>
+          </article>
         </section>
       )}
 

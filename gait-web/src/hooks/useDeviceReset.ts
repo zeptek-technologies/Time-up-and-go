@@ -27,10 +27,15 @@ export function useDeviceReset(): DeviceResetView {
     let cancelled = false;
     ensureAuth().then((ok) => {
       if (ok && !cancelled) {
-        unsub = subscribeDeviceCommand((c) => {
-          setRequestedAt(c.requestedAt);
-          setHandledAt(c.handledAt);
-        });
+        // ต้องมี error handler เสมอ (เหตุผลเดียวกับ useDeviceStatus): ถ้า Firestore
+        // ปฏิเสธ เช่น permission-denied ปุ่มจะค้างสถานะเดิมโดยไม่มีเบาะแสใน console
+        unsub = subscribeDeviceCommand(
+          (c) => {
+            setRequestedAt(c.requestedAt);
+            setHandledAt(c.handledAt);
+          },
+          (err) => console.error("[DeviceCommand]", err.message),
+        );
       }
     });
     return () => {

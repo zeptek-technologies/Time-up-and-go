@@ -10,6 +10,7 @@ import LiveStatusPage from "./components/LiveStatusPage";
 import PatientManagementPage from "./components/PatientManagementPage";
 import PendingUploadsBanner from "./components/PendingUploadsBanner";
 import { useTugData } from "./hooks/useTugData";
+import { setActiveSubject } from "./lib/firebase";
 import "./app-shell.css";
 // Loaded last: owns the visual direction (see console.css header).
 import "./console.css";
@@ -28,6 +29,20 @@ function DashboardApp() {
   const [active, setActive] = useState<SectionKey>("overview");
   const activePatientName = data.patientName(activePatientId);
   const navClick = useRef(false);
+
+  // Announce the selection so the live-status screen (a different page, often a
+  // different device) knows whose round this is — and so the chair stamps
+  // tug_results with the same subject. See setActiveSubject() for why every call
+  // starts a new session: pick the subject BEFORE the first trial, not mid-session.
+  useEffect(() => {
+    if (!activePatientId) return; // "ไม่ระบุ" isn't a selection worth broadcasting
+    setActiveSubject(activePatientId, data.patientName(activePatientId) ?? "").catch((err) =>
+      console.error("[ActiveSubject]", err),
+    );
+    // Deliberately keyed on the id alone: renaming a patient must not start a
+    // new session and reset the trial counter mid-test.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePatientId]);
 
   const navigate = (key: SectionKey) => {
     navClick.current = true;

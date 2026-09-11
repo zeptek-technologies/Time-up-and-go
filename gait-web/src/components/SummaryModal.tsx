@@ -1,4 +1,5 @@
 // Session summary — web port of draw_summary_modal().
+import { getDiseaseMeta } from "../lib/meta";
 import type { RiskScores } from "../lib/recorder";
 
 export interface Summary {
@@ -20,8 +21,10 @@ export default function SummaryModal({ summary, onClose }: { summary: Summary; o
       <div className="gc-modal" onClick={(e) => e.stopPropagation()}>
         <h2 className="gc-modal__title">สรุปผลการวิเคราะห์การเดิน</h2>
         <div className="gc-modal__rows">
+          {/* ป้ายผลใช้ชื่อไทยชุดเดียวกับตารางและจอสถานะ — เดิมกล่องนี้โชว์ค่าดิบ
+              ("Hemiplegic", "No Data") ทั้งที่ทุกหน้าจออื่นแปลไทยหมดแล้ว */}
           <div className="gc-modal__highlight">
-            ผลที่พบเด่นสุด: <b>{summary.highestRisk}</b> ({summary.riskPercentage.toFixed(1)}%)
+            ผลที่พบเด่นสุด: <b>{getDiseaseMeta(summary.highestRisk).th}</b> ({summary.riskPercentage.toFixed(1)}%)
           </div>
           <div>จำนวนเฟรมที่ประเมิน: {summary.totalFrames}</div>
           <div className="gc-modal__gait">
@@ -36,10 +39,9 @@ export default function SummaryModal({ summary, onClose }: { summary: Summary; o
             </span>
           </div>
           <div className="gc-modal__scores">
-            <span>Normal: {summary.riskScores.Normal}</span>
-            <span>Parkinsonian: {summary.riskScores.Parkinsonian}</span>
-            <span>Hemiplegic: {summary.riskScores.Hemiplegic}</span>
-            <span>Steppage: {summary.riskScores.Steppage}</span>
+            {(Object.keys(summary.riskScores) as (keyof RiskScores)[]).map((label) => (
+              <span key={label}>{getDiseaseMeta(label).th}: {summary.riskScores[label]}</span>
+            ))}
           </div>
           <div className={ok ? "gc-modal__status-ok" : "gc-modal__status-err"}>
             {ok ? "อัปโหลดขึ้น Firebase สำเร็จ" : summary.uploadStatus}

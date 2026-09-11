@@ -225,6 +225,22 @@
 .pm-profile h2 { margin: 2px 0 2px; font-size: 1.35rem; }
 .pm-profile p { margin: 0; color: var(--clr-text-secondary); font-size: 0.8rem; }
 
+.pm-profile__actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+
+.pm-edit {
+  border: 1px solid var(--clr-border);
+  background: #fff;
+  color: var(--clr-text);
+  border-radius: var(--r-field);
+  padding: 8px 11px;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pm-edit:hover { background: var(--clr-primary-50); color: var(--clr-primary-600); }
+
 .pm-delete {
   border: 1px solid color-mix(in srgb, var(--clr-high) 25%, white);
   background: var(--clr-high-bg);
@@ -380,6 +396,7 @@
 .pm-back:focus-visible,
 .pm-brand:focus-visible,
 .pm-delete:focus-visible,
+.pm-edit:focus-visible,
 .pm-dialog__close:focus-visible,
 .pm-field input:focus-visible,
 .pm-field select:focus-visible,
@@ -408,7 +425,7 @@
   .pm-detail { padding: 17px 14px; }
   .pm-profile { align-items: flex-start; }
   .pm-profile__avatar { width: 46px; height: 46px; }
-  .pm-delete { padding: 7px 8px; }
+  .pm-delete, .pm-edit { padding: 7px 8px; }
   .pm-stats { grid-template-columns: 1fr; }
   .pm-stats > div { border-right: 0; border-bottom: var(--rule); }
   .pm-stats > div:last-child { border-bottom: 0; }

@@ -103,42 +103,19 @@
 .live-brand strong { font-size: 1.05rem; }
 .live-brand small { color: var(--clr-text-secondary); font-size: 0.72rem; }
 
+/* การ์ดสถานะบอร์ดใช้ .device-chip ตัวเดียวกับหน้าหลัก (นิยามใน app-shell.css
+   ซึ่งโหลดทุกหน้าอยู่แล้ว) หน้านี้จึงเหลือแค่จัดวางแถว ไม่ต้องนิยามสีเอง
+   จะได้ไม่มีทางเพี้ยนกันเวลาแก้สีที่หน้าหลัก */
 .live-links {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 9px;
 }
-.live-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 11px;
-  border: 1px solid var(--clr-border);
-  border-radius: 999px;
-  background: #fff;
-  color: var(--clr-text-secondary);
-  font-size: 0.75rem;
-  font-weight: 700;
-}
-.live-link i {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #94a3b8;
-}
-.live-link--online {
-  color: #047857;
-  border-color: #a7f3d0;
-  background: #ecfdf5;
-}
-.live-link--online i { background: #10b981; }
-.live-link--offline {
-  color: #b91c1c;
-  border-color: #fecaca;
-  background: #fef2f2;
-}
-.live-link--offline i { background: #ef4444; }
+/* หน้าหลักซ่อนเวลา "อัปเดตล่าสุด" เมื่อจอแคบกว่า 1400px เพราะแถวหัวที่นั่นมี
+   เมนูมาแย่งที่ด้วย แต่หน้านี้มีแค่โลโก้กับการ์ดสถานะ พื้นที่เหลือเฟือ —
+   และเป็นจอที่เจ้าหน้าที่มองจากไกล ยิ่งต้องรู้ว่าข้อมูลเก่าแค่ไหน จึงคืนค่าให้แสดง */
+.live-links .device-chip__ago { display: inline; }
 
 .live-stage {
   max-width: 1380px;
@@ -331,6 +308,94 @@
 }
 .live-result__time span { font-size: 0.9rem; font-weight: 700; }
 
+/* ── สามแหล่งข้อมูลของรอบที่เพิ่งจบ + แถบสรุปความสอดคล้อง ──
+   auto-fit ทำให้จอกว้างได้ 3 ใบเรียงกัน จอแคบไหลลงเป็นคอลัมน์เองโดยไม่ต้องมี
+   breakpoint แยก — หน้านี้ถูกเปิดทั้งบนทีวีและบนแท็บเล็ตข้างเตียง */
+.live-detail {
+  max-width: 1380px;
+  margin: 14px auto 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+.live-detail__card,
+.live-verdict {
+  padding: 18px 20px;
+  border: 1px solid var(--clr-border);
+  border-radius: var(--r-panel);
+  background: #fff;
+}
+.live-detail__label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--clr-text-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.live-detail__card strong,
+.live-verdict strong {
+  display: block;
+  font-size: 1.2rem;
+  line-height: 1.3;
+}
+.live-detail__card p,
+.live-verdict p {
+  margin: 6px 0 0;
+  color: var(--clr-text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.live-detail__muted { color: var(--clr-text-secondary); font-weight: 600; }
+
+.live-detail__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.live-detail__tags li {
+  padding: 4px 10px;
+  border: 1px solid var(--clr-border);
+  border-radius: 999px;
+  background: var(--clr-bg);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+/* โรคที่อธิบายสิ่งที่กล้องเห็นได้ — เน้นให้เห็นว่า "อันนี้แหละที่ตรงกัน" */
+.live-detail__tags li.is-matched {
+  border-color: var(--clr-primary-200);
+  background: var(--clr-primary-50);
+  color: var(--clr-primary-700);
+}
+
+/* แถบสรุปกินเต็มแถวเสมอ เพราะเป็นบรรทัดที่เจ้าหน้าที่ต้องอ่านก่อนเพื่อน */
+.live-verdict { grid-column: 1 / -1; border-left: 5px solid var(--clr-border); }
+.live-verdict--match {
+  border-color: #a7f3d0;
+  border-left-color: #10b981;
+  background: #ecfdf5;
+}
+.live-verdict--unexplained {
+  border-color: #fecaca;
+  border-left-color: #ef4444;
+  background: #fef2f2;
+}
+.live-verdict--history-only {
+  border-color: #fde68a;
+  border-left-color: #f59e0b;
+  background: #fffbeb;
+}
+.live-verdict--clear {
+  border-color: #a7f3d0;
+  border-left-color: #10b981;
+  background: #f0fdf4;
+}
+.live-verdict--no-camera { border-left-color: #94a3b8; }
+
 .live-footer {
   max-width: 1380px;
   margin: 15px auto 0;
@@ -362,10 +427,8 @@
     flex-wrap: wrap;
     gap: 5px;
   }
-  .live-link {
-    padding: 4px 7px;
-    font-size: 0.64rem;
-  }
+  /* บนมือถือแถวหัวแคบจริง ๆ — ตัดเวลาออกเหมือนหน้าหลัก ข้อมูลยังอยู่ใน tooltip */
+  .live-links .device-chip__ago { display: none; }
   .live-stage {
     display: block;
     min-height: 0;

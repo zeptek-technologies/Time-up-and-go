@@ -29,9 +29,14 @@ export default function RecordsSection({ data }: { data: TugData }) {
   };
 
   let rows = showAborted ? results : results.filter((r) => r.status === "completed");
-  if (filter !== "ALL") rows = rows.filter((r) => riskLevelOf(r.totalSec) === filter);
-  if (search) {
-    const q = search.toLowerCase();
+  // กรองระดับความเสี่ยงเฉพาะรอบที่สำเร็จ — รอบที่ยกเลิกเก็บ "เวลาที่ผ่านไปก่อนถูก
+  // ยกเลิก" ไม่ใช่เวลา TUG จริง การเอาไปจัดระดับจึงได้ผลที่ขัดกับช่องผลของมันเอง
+  // (แถวขึ้นว่า "ยกเลิก" แต่ดันโผล่มาในตัวกรอง "สูง")
+  if (filter !== "ALL") {
+    rows = rows.filter((r) => r.status === "completed" && riskLevelOf(r.totalSec) === filter);
+  }
+  const q = search.trim().toLowerCase();
+  if (q) {
     rows = rows.filter((r) => {
       const pn = patientName(r.patientId) ?? "";
       return (
@@ -66,7 +71,10 @@ export default function RecordsSection({ data }: { data: TugData }) {
               <path d="M16 16l4 4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
             </svg>
           </span>
-          <input type="text" placeholder="ค้นหาจากชื่อผู้ทดสอบ, รหัส, ระดับความเสี่ยง, เวลา..." value={search} onChange={(e) => setSearch(e.target.value.trim())} />
+          {/* ห้าม .trim() ตรงนี้: ช่องนี้เป็น controlled input การตัดช่องว่างทุกครั้งที่พิมพ์
+              ทำให้เคาะ space ไม่ติด — ค้นชื่อที่มีเว้นวรรค ("สมชาย ใจดี") ไม่ได้เลย
+              ตัดตอนเอาไปเทียบแทน */}
+          <input type="text" placeholder="ค้นหาจากชื่อผู้ทดสอบ, รหัส, ระดับความเสี่ยง, เวลา..." value={search} onChange={(e) => setSearch(e.target.value)} />
         </label>
         <div className="filter-group" role="group" aria-label="กรองระดับความเสี่ยง">
           {FILTERS.map((f) => (

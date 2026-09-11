@@ -10,6 +10,7 @@ import {
   subscribeGaitAssessments,
   subscribePatients,
   subscribeResults,
+  updatePatient,
   type GaitAssessment,
   type Patient,
   type TugResult,
@@ -33,6 +34,7 @@ export interface TugData {
   assessmentsError: string | null;
   patientName: (id: string) => string | null;
   addPatient: typeof addPatient;
+  updatePatient: typeof updatePatient;
   removePatient: (id: string) => Promise<void>;
   assignResult: typeof assignResultToPatient;
   assignAssessment: typeof assignGaitAssessmentToPatient;
@@ -103,6 +105,7 @@ export function useTugData(): TugData {
     assessmentsError,
     patientName,
     addPatient,
+    updatePatient,
     removePatient,
     assignResult: assignResultToPatient,
     assignAssessment: assignGaitAssessmentToPatient,

@@ -1,32 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTugData, type TugData } from "../hooks/useTugData";
-import { riskClass, riskThai } from "../lib/meta";
+import { CONDITION_LABEL, CONDITION_OPTIONS } from "../lib/conditions";
+import { getDiseaseMeta, riskClass, riskThai } from "../lib/meta";
 import { riskLevelOf } from "../lib/tugRisk";
 import { formatIsoThai, formatThai } from "../lib/time";
 import { IconClose, IconPatients, IconPlus, IconUser } from "./Icons";
-
-interface ConditionOption {
-  id: string;
-  label: string;
-  hint: string;
-  group: "ระบบประสาท" | "กระดูกและข้อ" | "การทรงตัว" | "หัวใจและปอด";
-}
-
-// Common diagnosed conditions that can change walking, balance, joint motion,
-// muscle control, or exercise tolerance. These are background data—not diagnoses.
-const CONDITION_OPTIONS: ConditionOption[] = [
-  { id: "parkinsons", label: "โรคพาร์กินสัน / กลุ่มอาการพาร์กินสัน", hint: "อาจก้าวสั้น เดินช้า หรือเสียการทรงตัว", group: "ระบบประสาท" },
-  { id: "stroke", label: "เคยเป็นโรคหลอดเลือดสมอง", hint: "อาจมีแขนขาอ่อนแรงหรือควบคุมการเดินได้ไม่เท่ากัน", group: "ระบบประสาท" },
-  { id: "multiple-sclerosis", label: "โรคปลอกประสาทเสื่อมแข็ง (MS)", hint: "อาจมีอาการอ่อนแรง เกร็ง และเดินไม่มั่นคง", group: "ระบบประสาท" },
-  { id: "peripheral-neuropathy", label: "ปลายประสาทเสื่อม / เบาหวานลงปลายประสาท", hint: "อาจชาเท้า รับรู้ตำแหน่งเท้าลดลง หรือเสียสมดุล", group: "ระบบประสาท" },
-  { id: "ataxia", label: "โรคสมองน้อยหรือภาวะเดินเซ (Ataxia)", hint: "กระทบการประสานงานและการทรงตัว", group: "ระบบประสาท" },
-  { id: "arthritis", label: "ข้อเสื่อมหรือข้ออักเสบที่สะโพก เข่า หรือเท้า", hint: "ความปวดและข้อฝืดอาจทำให้ลุกหรือเดินช้าลง", group: "กระดูกและข้อ" },
-  { id: "vestibular", label: "โรคหูชั้นในหรือโรคการทรงตัว", hint: "อาจเวียนศีรษะ เดินโซเซ หรือรู้สึกว่าจะล้ม", group: "การทรงตัว" },
-  { id: "heart-failure", label: "ภาวะหัวใจล้มเหลว", hint: "อาจเหนื่อยหรือหอบเมื่อเดินระยะสั้น", group: "หัวใจและปอด" },
-  { id: "copd", label: "โรคปอดอุดกั้นเรื้อรัง (COPD)", hint: "อาจหายใจลำบากและเหนื่อยเมื่อออกแรง", group: "หัวใจและปอด" },
-];
-
-const CONDITION_LABEL = new Map(CONDITION_OPTIONS.map((item) => [item.id, item.label]));
 
 export default function PatientManagementPage() {
   const data = useTugData();
@@ -153,7 +131,7 @@ export default function PatientManagementPage() {
         </div>
       </main>
 
-      {addOpen && <AddPatientDialog data={data} onClose={() => setAddOpen(false)} />}
+      {addOpen && <PatientDialog data={data} onClose={() => setAddOpen(false)} />}
     </div>
   );
 }
@@ -167,6 +145,7 @@ function PatientDetail({
   patient: TugData["patients"][number];
   onDeleted: () => void;
 }) {
+  const [editOpen, setEditOpen] = useState(false);
   const results = data.results.filter((result) => result.patientId === patient.id);
   const completed = results.filter((result) => result.status === "completed");
   const assessments = data.assessments.filter((assessment) => assessment.patientId === patient.id);
@@ -198,7 +177,10 @@ function PatientDetail({
             </p>
           </div>
         </div>
-        <button className="pm-delete" type="button" onClick={remove}>ลบผู้ทดสอบ</button>
+        <div className="pm-profile__actions">
+          <button className="pm-edit" type="button" onClick={() => setEditOpen(true)}>แก้ไขข้อมูล</button>
+          <button className="pm-delete" type="button" onClick={remove}>ลบผู้ทดสอบ</button>
+        </div>
       </div>
 
       <div className="pm-conditions">
@@ -217,6 +199,8 @@ function PatientDetail({
         )}
         {patient.note && <p className="pm-note"><strong>หมายเหตุ:</strong> {patient.note}</p>}
       </div>
+
+      {editOpen && <PatientDialog data={data} patient={patient} onClose={() => setEditOpen(false)} />}
 
       <div className="pm-stats" aria-label="สรุปผล TUG">
         <div><span>ทดสอบสำเร็จ</span><strong>{completed.length}</strong><small>ครั้ง</small></div>
@@ -279,7 +263,7 @@ function PatientDetail({
               ) : assessments.map((assessment) => (
                 <tr key={assessment.id}>
                   <td data-label="วันและเวลา">{formatIsoThai(assessment.timestampRaw)}</td>
-                  <td data-label="ผลที่ตรวจพบ">{assessment.condition}</td>
+                  <td data-label="ผลที่ตรวจพบ">{getDiseaseMeta(assessment.condition).th}</td>
                   <td data-label="ความมั่นใจ">{assessment.confidence.toFixed(1)}%</td>
                   <td data-label="จำนวนก้าว">{assessment.stepCount ?? "—"}</td>
                   <td data-label="จังหวะก้าว">{assessment.cadenceAvg === null ? "—" : `${assessment.cadenceAvg.toFixed(1)} ก้าว/นาที`}</td>
@@ -293,13 +277,30 @@ function PatientDetail({
   );
 }
 
-function AddPatientDialog({ data, onClose }: { data: TugData; onClose: () => void }) {
-  const [name, setName] = useState("");
-  const [age, setAge] = useState("");
-  const [gender, setGender] = useState("");
-  const [note, setNote] = useState("");
-  const [conditions, setConditions] = useState<string[]>([]);
-  const [otherCondition, setOtherCondition] = useState("");
+// ฟอร์มเดียวใช้ทั้งเพิ่มและแก้ไข: ช่องที่กรอกเหมือนกันเป๊ะ และการมีฟอร์มแก้ไขคือ
+// ทางเดียวที่จะใส่โรคประจำตัวให้คนที่อยู่ในทะเบียนอยู่แล้วได้ — เดิมทำได้แค่ตอนสร้าง
+// ใหม่ ซึ่งแปลว่าต้องลบทิ้งแล้วสร้างใหม่ และประวัติผลเดิมจะขาดจากรายชื่อไปด้วย
+function PatientDialog({
+  data,
+  patient,
+  onClose,
+}: {
+  data: TugData;
+  patient?: TugData["patients"][number];
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(patient?.name ?? "");
+  const [age, setAge] = useState(patient?.age != null ? String(patient.age) : "");
+  const [gender, setGender] = useState(patient?.gender ?? "");
+  const [note, setNote] = useState(patient?.note ?? "");
+  // โรคที่พิมพ์เองถูกเก็บเป็นข้อความดิบปนอยู่ใน array เดียวกับ id มาตรฐาน จึงต้อง
+  // แยกกลับตอนเปิดแก้ไข ไม่งั้นข้อความที่พิมพ์เองจะหายไปเงียบ ๆ เมื่อกดบันทึก
+  const [conditions, setConditions] = useState<string[]>(
+    () => patient?.conditions.filter((id) => CONDITION_LABEL.has(id)) ?? [],
+  );
+  const [otherCondition, setOtherCondition] = useState(
+    () => patient?.conditions.filter((id) => !CONDITION_LABEL.has(id)).join(", ") ?? "",
+  );
   const [saving, setSaving] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -321,10 +322,24 @@ function AddPatientDialog({ data, onClose }: { data: TugData; onClose: () => voi
     event.preventDefault();
     if (!name.trim()) return;
     setSaving(true);
-    const savedConditions = [...conditions];
-    if (otherCondition.trim()) savedConditions.push(otherCondition.trim());
+    // คั่นด้วยจุลภาคได้หลายรายการ เพื่อให้ค่าที่พิมพ์เองไป-กลับระหว่างฟอร์มกับ
+    // Firestore ได้ครบ (ตอนเปิดแก้ไขเรา join ด้วย ", " เหมือนกัน)
+    const savedConditions = [
+      ...conditions,
+      ...otherCondition.split(",").map((item) => item.trim()).filter(Boolean),
+    ];
     try {
-      await data.addPatient(name.trim(), age, gender, note.trim(), savedConditions);
+      if (patient) {
+        await data.updatePatient(patient.id, {
+          name: name.trim(),
+          age,
+          gender,
+          note: note.trim(),
+          conditions: savedConditions,
+        });
+      } else {
+        await data.addPatient(name.trim(), age, gender, note.trim(), savedConditions);
+      }
       onClose();
     } catch (error) {
       alert(`บันทึกผู้ทดสอบไม่สำเร็จ: ${(error as Error).message}`);
@@ -339,8 +354,8 @@ function AddPatientDialog({ data, onClose }: { data: TugData; onClose: () => voi
       <div className="pm-dialog" role="dialog" aria-modal="true" aria-labelledby="pm-dialog-title" ref={dialogRef}>
         <div className="pm-dialog__header">
           <div>
-            <span className="section-header__eyebrow">New Patient</span>
-            <h2 id="pm-dialog-title">เพิ่มผู้ทดสอบใหม่</h2>
+            <span className="section-header__eyebrow">{patient ? "Edit Patient" : "New Patient"}</span>
+            <h2 id="pm-dialog-title">{patient ? "แก้ไขข้อมูลผู้ทดสอบ" : "เพิ่มผู้ทดสอบใหม่"}</h2>
           </div>
           <button ref={closeButtonRef} className="pm-dialog__close" type="button" onClick={onClose} aria-label="ปิดหน้าต่าง">
             <IconClose width={20} height={20} />
@@ -407,7 +422,7 @@ function AddPatientDialog({ data, onClose }: { data: TugData; onClose: () => voi
           <div className="pm-dialog__actions">
             <button className="btn btn--ghost" type="button" onClick={onClose}>ยกเลิก</button>
             <button className="btn btn--primary" type="submit" disabled={saving}>
-              {saving ? "กำลังบันทึก…" : "บันทึกผู้ทดสอบ"}
+              {saving ? "กำลังบันทึก…" : patient ? "บันทึกการแก้ไข" : "บันทึกผู้ทดสอบ"}
             </button>
           </div>
         </form>

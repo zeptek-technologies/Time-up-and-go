@@ -223,6 +223,35 @@
 }
 .gc-controls__patient strong { color: var(--clr-text); }
 
+/* สถานะการเชื่อมกับเก้าอี้ + สิ่งที่ระบบเพิ่งทำเองอัตโนมัติ
+   กินเต็มแถวทั้งคู่ เพราะเป็นข้อความที่ต้องอ่านก่อนตัดสินใจกดปุ่มด้านล่าง */
+.gc-auto {
+  flex: 1 1 100%;
+  padding: 8px 11px;
+  border-radius: var(--radius-md, 8px);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+.gc-auto--on {
+  border: 1px solid var(--clr-low-soft, #a7f3d0);
+  background: var(--clr-low-bg, #ecfdf5);
+  color: var(--clr-low, #047857);
+}
+.gc-auto--off {
+  border: 1px solid var(--clr-border);
+  background: var(--clr-bg);
+  color: var(--clr-text-secondary);
+}
+.gc-auto__note {
+  flex: 1 1 100%;
+  padding: 8px 11px;
+  border-left: 3px solid var(--clr-primary-600);
+  background: var(--clr-primary-50);
+  color: var(--clr-text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
 .gc-btn {
   border: 1px solid var(--clr-border);
   background: #fff;
