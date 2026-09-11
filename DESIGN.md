@@ -83,3 +83,6 @@ Preserve Thai labels, data semantics and clinical caveats verbatim. Risk bars ha
 - Do reuse the shared palette and semantic stage colors across the registry and live screen.
 - Don't introduce decorative medical assertions or alter risk thresholds.
 - Don't hide scrollbars or remove narrow-screen destinations.
+
+## Bounded datasets (2026-09-11)
+The dashboard's patients, TUG records and disease assessments share Pagination, DataSearch and DataViewport. Default 5 items, choices 5/10/20; filter the entire subscribed dataset before slicing. Patient viewport 320px, result viewports 440px, including on mobile. Only these list surfaces scroll; headings, filters, pagination and selected patient remain outside. No page-shell height restriction. Table headers stick within the table on desktop; existing labeled record cards remain on mobile. Fixed geometry preserves the footer position on short/empty pages; row entrance animation is disabled during page changes. All palette values reuse the existing tokens.

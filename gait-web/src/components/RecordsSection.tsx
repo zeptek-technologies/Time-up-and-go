@@ -1,3 +1,7 @@
+import DataViewport from "./DataViewport";
+import Pagination from "./Pagination";
+import DataSearch from "./DataSearch";
+import { usePagination } from "../hooks/usePagination";
 import { useState } from "react";
 import type { TugData } from "../hooks/useTugData";
 import { riskClass, riskThai } from "../lib/meta";
@@ -52,6 +56,8 @@ export default function RecordsSection({ data }: { data: TugData }) {
     });
   }
 
+  const pagination = usePagination(rows, JSON.stringify([q, filter, showAborted]));
+
   const abortedCount = results.length - results.filter((r) => r.status === "completed").length;
 
   return (
@@ -64,21 +70,10 @@ export default function RecordsSection({ data }: { data: TugData }) {
       </div>
 
       <div className="toolbar">
-        <label className="search-box">
-          <span className="search-box__icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24">
-              <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
-              <path d="M16 16l4 4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-            </svg>
-          </span>
-          {/* ห้าม .trim() ตรงนี้: ช่องนี้เป็น controlled input การตัดช่องว่างทุกครั้งที่พิมพ์
-              ทำให้เคาะ space ไม่ติด — ค้นชื่อที่มีเว้นวรรค ("สมชาย ใจดี") ไม่ได้เลย
-              ตัดตอนเอาไปเทียบแทน */}
-          <input type="text" placeholder="ค้นหาจากชื่อผู้ทดสอบ, รหัส, ระดับความเสี่ยง, เวลา..." value={search} onChange={(e) => setSearch(e.target.value)} />
-        </label>
+        <DataSearch label="ค้นหาผลการทดสอบ" placeholder="ค้นหาชื่อ รหัส ระดับความเสี่ยง หรือเวลา" value={search} onChange={setSearch} />
         <div className="filter-group" role="group" aria-label="กรองระดับความเสี่ยง">
           {FILTERS.map((f) => (
-            <button key={f.key} type="button" className={`filter-chip ${filter === f.key ? "filter-chip--active" : ""}`} onClick={() => setFilter(f.key)}>
+            <button key={f.key} type="button" className={`filter-chip ${filter === f.key ? "filter-chip--active" : ""}`} aria-pressed={filter === f.key} onClick={() => setFilter(f.key)}>
               {f.label}
             </button>
           ))}
@@ -86,6 +81,7 @@ export default function RecordsSection({ data }: { data: TugData }) {
             <button
               type="button"
               className={`filter-chip ${showAborted ? "filter-chip--active" : ""}`}
+              aria-pressed={showAborted}
               onClick={() => setShowAborted((v) => !v)}
               title="รอบที่ถูกยกเลิก/หมดเวลา — ไม่ถูกนำไปคิดสถิติ"
             >
@@ -95,7 +91,7 @@ export default function RecordsSection({ data }: { data: TugData }) {
         </div>
       </div>
 
-      <div className="table-wrap">
+      <DataViewport className="table-wrap data-viewport" label="ผลการทดสอบในหน้านี้" resetKey={JSON.stringify([search, filter, showAborted, pagination.page, pagination.pageSize])}>
         <table className="results-table">
           <thead>
             <tr>
@@ -107,13 +103,13 @@ export default function RecordsSection({ data }: { data: TugData }) {
             {rows.length === 0 ? (
               <tr><td colSpan={9} className="table-empty"><div className="table-empty__inner"><p>ไม่พบข้อมูลที่ตรงกับเงื่อนไข</p></div></td></tr>
             ) : (
-              rows.map((r, i) => {
+              pagination.items.map((r, i) => {
                 const pn = patientName(r.patientId);
                 const level = riskLevelOf(r.totalSec);
                 const aborted = r.status === "aborted";
                 return (
                   <tr key={r.id} style={aborted ? { opacity: 0.55 } : undefined}>
-                    <td data-label="ลำดับ" style={{ fontWeight: 600, color: "var(--clr-text-secondary)" }}>{i + 1}</td>
+                    <td data-label="ลำดับ" style={{ fontWeight: 600, color: "var(--clr-text-secondary)" }}>{pagination.offset + i + 1}</td>
                     <td data-label="ผู้ทดสอบ">
                       <span className={`patient-name-badge ${pn ? "" : "patient-name-badge--empty"}`}>
                         {pn ?? (r.subjectKey && r.subjectKey !== "unassigned" ? r.subjectKey : "ไม่ระบุ")}
@@ -143,7 +139,8 @@ export default function RecordsSection({ data }: { data: TugData }) {
             )}
           </tbody>
         </table>
-      </div>
+      </DataViewport>
+      <Pagination label="ผลการทดสอบ" {...pagination} />
     </section>
   );
 }

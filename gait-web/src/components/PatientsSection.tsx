@@ -1,3 +1,8 @@
+import DataViewport from "./DataViewport";
+import { useState } from "react";
+import Pagination from "./Pagination";
+import DataSearch from "./DataSearch";
+import { usePagination } from "../hooks/usePagination";
 import type { TugData } from "../hooks/useTugData";
 import { IconPatients, IconPlus, IconUser } from "./Icons";
 
@@ -9,6 +14,11 @@ interface Props {
 
 export default function PatientsSection({ data, activePatientId, setActivePatientId }: Props) {
   const { patients, results, assessments, removePatient } = data;
+
+  const [search, setSearch] = useState("");
+  const query = search.trim().toLocaleLowerCase("th-TH");
+  const filtered = patients.filter((p) => [p.name, p.id, p.age, p.gender, p.note].join(" ").toLocaleLowerCase("th-TH").includes(query));
+  const pagination = usePagination(filtered, query);
 
   const onDelete = async (id: string, name: string) => {
     if (!confirm(`ต้องการลบผู้ทดสอบ "${name}" จริงหรือไม่?\nผลการทดสอบที่ผูกไว้จะถูกปลดออก`)) return;
@@ -34,14 +44,16 @@ export default function PatientsSection({ data, activePatientId, setActivePatien
           </a>
         </div>
 
+        <div className="toolbar"><DataSearch label="ค้นหาผู้ทดสอบ" placeholder="ค้นหาชื่อ รหัส หรือหมายเหตุ" value={search} onChange={setSearch} /></div>
+        <DataViewport className="data-viewport data-viewport--patients" label="รายชื่อผู้ทดสอบในหน้านี้" resetKey={JSON.stringify([search, pagination.page, pagination.pageSize])}>
         <div className="patients-grid">
-          {patients.length === 0 ? (
+          {filtered.length === 0 ? (
             <div style={{ gridColumn: "1/-1", textAlign: "center", padding: 40, color: "var(--clr-text-secondary)" }}>
               <IconPatients width={44} height={44} style={{ color: "#94a3b8", marginBottom: 8 }} />
-              <p style={{ fontSize: ".85rem" }}>ยังไม่มีข้อมูลผู้ทดสอบ — กดปุ่ม "เพิ่มผู้ทดสอบ" เพื่อเริ่มต้น</p>
+              <p style={{ fontSize: ".85rem" }}>{query ? "ไม่พบผู้ทดสอบที่ตรงกับคำค้น" : 'ยังไม่มีข้อมูลผู้ทดสอบ — กดปุ่ม "เพิ่มผู้ทดสอบ" เพื่อเริ่มต้น'}</p>
             </div>
           ) : (
-            patients.map((p) => {
+            pagination.items.map((p) => {
               const meta: string[] = [];
               if (p.age) meta.push(`${p.age} ปี`);
               if (p.gender) meta.push(p.gender);
@@ -66,6 +78,8 @@ export default function PatientsSection({ data, activePatientId, setActivePatien
             })
           )}
         </div>
+        </DataViewport>
+        <Pagination label="ผู้ทดสอบ" {...pagination} />
       </section>
 
       <ActivePatientBar patients={patients} value={activePatientId} onChange={setActivePatientId} />

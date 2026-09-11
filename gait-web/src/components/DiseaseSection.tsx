@@ -1,3 +1,8 @@
+import DataViewport from "./DataViewport";
+import { useState } from "react";
+import Pagination from "./Pagination";
+import DataSearch from "./DataSearch";
+import { usePagination } from "../hooks/usePagination";
 import type { TugData } from "../hooks/useTugData";
 import { getDiseaseMeta } from "../lib/meta";
 import { formatIsoThai } from "../lib/time";
@@ -6,6 +11,11 @@ const ORDER = ["Normal", "Parkinsonian", "Hemiplegic", "Steppage"];
 
 export default function DiseaseSection({ data }: { data: TugData }) {
   const { assessments, assessmentsError, patients, patientName, assignAssessment } = data;
+
+  const [search, setSearch] = useState("");
+  const query = search.trim().toLocaleLowerCase("th-TH");
+  const filtered = assessments.filter((item) => [patientName(item.patientId), item.id, getDiseaseMeta(item.condition).th, item.condition].join(" ").toLocaleLowerCase("th-TH").includes(query));
+  const pagination = usePagination(filtered, query);
 
   const onAssign = async (id: string, pid: string) => {
     try {
@@ -72,7 +82,8 @@ export default function DiseaseSection({ data }: { data: TugData }) {
         })}
       </div>
 
-      <div className="table-wrap disease-table-wrap">
+      <div className="toolbar"><DataSearch label="ค้นหาผลประเมินโรค" placeholder="ค้นหาชื่อ รหัส หรือผลที่พบ" value={search} onChange={setSearch} /></div>
+      <DataViewport className="table-wrap disease-table-wrap data-viewport" label="ผลประเมินโรคในหน้านี้" resetKey={JSON.stringify([search, pagination.page, pagination.pageSize])}>
         <table className="results-table disease-table">
           <thead>
             <tr>
@@ -87,10 +98,10 @@ export default function DiseaseSection({ data }: { data: TugData }) {
                   <small>{assessmentsError}</small>
                 </div>
               </td></tr>
-            ) : assessments.length === 0 ? (
-              <tr><td colSpan={8} className="table-empty"><div className="table-empty__inner"><p>ยังไม่มีข้อมูลความเสี่ยงโรคจาก gait_assessments</p></div></td></tr>
+            ) : filtered.length === 0 ? (
+              <tr><td colSpan={8} className="table-empty"><div className="table-empty__inner"><p>{query ? "ไม่พบผลประเมินที่ตรงกับคำค้น" : "ยังไม่มีข้อมูลความเสี่ยงโรคจาก gait_assessments"}</p></div></td></tr>
             ) : (
-              assessments.map((item, i) => {
+              pagination.items.map((item, i) => {
                 const meta = getDiseaseMeta(item.condition);
                 const pn = patientName(item.patientId);
                 const scores = Object.entries(item.riskScores)
@@ -100,7 +111,7 @@ export default function DiseaseSection({ data }: { data: TugData }) {
                   ));
                 return (
                   <tr key={item.id}>
-                    <td data-label="ลำดับ" style={{ fontWeight: 600, color: "var(--clr-text-secondary)" }}>{i + 1}</td>
+                    <td data-label="ลำดับ" style={{ fontWeight: 600, color: "var(--clr-text-secondary)" }}>{pagination.offset + i + 1}</td>
                     <td data-label="ผู้ป่วย">
                       <span className={`patient-name-badge ${pn ? "" : "patient-name-badge--empty"}`}>{pn ?? "ไม่ระบุ"}</span>
                     </td>
@@ -140,7 +151,8 @@ export default function DiseaseSection({ data }: { data: TugData }) {
             )}
           </tbody>
         </table>
-      </div>
+      </DataViewport>
+      <Pagination label="ผลประเมินโรค" {...pagination} />
     </section>
   );
 }

@@ -141,3 +141,44 @@ textarea { resize: none; min-height: 100px; }
   .app-header, .workspace-intro > .btn { display: none; }
   .page-main { max-width: none; padding: 0; }
 }
+
+/* Bounded datasets: controls stay outside the scroller, camera stays mounted. */
+.data-search { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 260px; max-width: 520px; border: var(--rule); border-radius: var(--r-field); background: var(--clr-surface); padding: 0 12px; }
+.data-search > svg { width: 19px; height: 19px; color: var(--clr-text-secondary); flex-shrink: 0; }
+.data-search input { min-width: 0; width: 100%; border: 0; background: transparent; padding: 12px 0; font: inherit; font-size: .85rem; color: var(--clr-text); }
+.data-search input::-webkit-search-cancel-button { -webkit-appearance: none; }
+.data-search:focus-within { outline: 2px solid var(--clr-primary-600); outline-offset: 2px; }
+.data-search input:focus-visible { outline: none; }
+.data-search button { border: 0; background: var(--clr-primary-50); color: var(--clr-primary-700); border-radius: 8px; min-width: 32px; min-height: 32px; font-size: 1.2rem; }
+.data-search button:hover { background: var(--clr-primary-100); }
+.data-viewport { height: 440px; overflow: auto; overscroll-behavior: auto; scrollbar-gutter: stable; scroll-padding-block: 52px 12px; border: var(--rule); border-radius: var(--r-field); background: var(--clr-surface); }
+.data-viewport--patients { height: 320px; }
+.data-viewport .patients-grid { border: 0; border-radius: 0; margin: 0; }
+.data-viewport .results-table { margin: 0; }
+.data-viewport .results-table thead th { position: sticky; top: 0; z-index: 2; background: var(--clr-primary-50); }
+.data-viewport:focus-visible { outline: 2px solid var(--clr-primary-600); outline-offset: 3px; }
+.data-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 16px 0 0; font-size: .8rem; color: var(--clr-text-secondary); font-variant-numeric: tabular-nums; }
+.data-pagination__range { margin-right: auto; }
+.data-pagination__size { display: flex; align-items: center; gap: 8px; }
+.data-pagination select { font: inherit; padding: 8px; border: var(--rule); border-radius: 8px; background: var(--clr-surface); color: var(--clr-text); min-height: 40px; }
+.data-pagination__steps { display: flex; align-items: center; gap: 12px; }
+.data-pagination__steps > span { min-width: 80px; text-align: center; }
+.data-pagination button { width: 40px; height: 40px; border: var(--rule); border-radius: 10px; background: var(--clr-surface); color: var(--clr-primary-700); font: inherit; font-size: 1.1rem; }
+.data-pagination button:hover:not(:disabled) { background: var(--clr-primary-50); border-color: var(--clr-primary-300); }
+.data-pagination button:active:not(:disabled) { background: var(--clr-primary-100); }
+.data-pagination button:disabled { opacity: .4; }
+@media (max-width: 760px) {
+  .toolbar .data-search { flex: 0 1 auto; width: 100%; max-width: none; }
+  .data-viewport { height: 440px; overflow: auto; padding: 0 10px; }
+  .data-viewport--patients { height: 320px; padding: 0; }
+  .data-pagination { gap: 12px 8px; }
+  .data-pagination__range { flex: 1 1 100%; }
+  .data-pagination__steps { margin-left: auto; gap: 8px; }
+  .data-pagination__steps > span { min-width: 65px; }
+}
+@media print {
+  .data-viewport { height: auto; overflow: visible; }
+  .data-pagination button, .data-pagination__size, .data-search { display: none; }
+}
+/* Page changes should reveal rows immediately rather than replay entrance fades. */
+.data-viewport .results-table tbody tr { animation: none; }
