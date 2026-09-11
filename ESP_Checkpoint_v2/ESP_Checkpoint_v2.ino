@@ -9,6 +9,8 @@
 //       ขาวค้าง        = ผ่านจุดหมุนตัว    เขียว/เหลือง/แดงค้าง = ผล LOW/MODERATE/HIGH
 //     (ดูตารางเต็มที่หัวข้อ "RGB LED + ไฟสถานะ")
 //   • ขั้นตอนที่เก้าอี้เห็น (นั่ง/ลุก/จบรอบ) ส่งมาทาง ESP-NOW ใน field chairState
+//   • ไม่มีหน้าตั้งค่า WiFi ของตัวเอง — ขอ SSID/รหัสจากบอร์ดเก้าอี้ผ่าน ESP-NOW
+//     เจ้าหน้าที่จึงตั้งค่า WiFi ที่เดียวคือที่ TUG-Chair-Setup
 //   • รายงานสถานะตัวเองขึ้น Firestore ให้เว็บเห็น (device_status/checkpoint)
 //   • รับคำสั่งรีเซ็ตจากเว็บได้เอง (device_commands/checkpoint)
 //
@@ -20,24 +22,28 @@
 
 #include <esp_now.h>
 #include <WiFi.h>
+#include <esp_wifi.h>       // esp_wifi_set_channel() — ใช้ไล่หาช่องของบอร์ดเก้าอี้
 #include <time.h>
 #include <Firebase_ESP_Client.h>
 #include "addons/TokenHelper.h"
+
+// บอร์ดนี้ไม่มีหน้าตั้งค่าของตัวเอง — รับ WiFi มาจากบอร์ดเก้าอี้ทาง ESP-NOW
+// ตัดหน้าเว็บ ~13KB ออกจาก flash (สเก็ตช์นี้ชนเพดาน partition อยู่แล้ว)
+// ⚠️ ต้องนิยาม "ก่อน" include TUGWiFiPortal.h
+#define TUG_PORTAL_NO_HTML
 #include "TUGWiFiPortal.h"
 
-#define FW_VERSION "checkpoint-2.3.0"
+#define FW_VERSION "checkpoint-2.5.1"
 
 // ============================================================
 // ⚙️  USER CONFIGURATION — แก้ไขค่าเหล่านี้ก่อนอัปโหลด
 //     ใช้ค่าเดียวกับที่ตั้งไว้ใน ESP_Chair_v2.ino
 // ============================================================
 
-// --- WiFi Setup Portal ---
-// บอร์ดเปิด WiFi ของตัวเองค้างไว้ตลอด ต่อเข้าวงนี้แล้วหน้าตั้งค่าจะเด้งขึ้นเอง
-// (ถ้าไม่เด้ง เปิดเบราว์เซอร์ไปที่ http://192.168.4.1)
-//
-// ⚠️  ชื่อ AP ต้องไม่ซ้ำกับของ ESP_Chair จะได้แยกออกว่ากำลังตั้งค่าบอร์ดไหน
-#define AP_SSID       "TUG-Checkpoint-Setup"
+// --- AP สำรอง (ปกติไม่เปิด) ---
+// บอร์ดนี้รับ WiFi จากบอร์ดเก้าอี้ทาง ESP-NOW จึงไม่กระจาย SSID ของตัวเอง
+// ชื่อนี้จะโผล่ก็ต่อเมื่อรับค่าไม่สำเร็จภายใน 3 นาที เพื่อให้เข้าไปตั้งค่าเองได้
+#define AP_SSID       "TUG-Checkpoint-Recovery"
 #define AP_PASSWORD   "tugsetup123"
 
 // --- Firebase (Cloud Firestore) ---
@@ -63,6 +69,10 @@
 
 // ---------- Distance Thresholds (cm) ----------
 #define DIST_DETECT        30.0   // ตรวจพบคนภายใน 30 ซม.
+// ค่าบนเป็น "ค่าเริ่มต้น" — ปรับได้จากหน้าเว็บ (ตั้งค่าอุปกรณ์) ค่าที่ใช้จริงอยู่ใน distDetectCm และจำไว้ใน NVS
+// ⚠️ ช่วงค่าต้องตรงกับ LIMITS ใน gait-web/src/lib/deviceConfig.ts
+#define CFG_DETECT_MIN_CM  10.0
+#define CFG_DETECT_MAX_CM 150.0
 #define DIST_MAX_VALID    400.0   // ระยะสูงสุดที่เป็นไปได้
 #define DIST_TIMEOUT      999.0   // ค่าที่คืนเมื่อไม่มี echo
 
@@ -83,9 +93,11 @@
 #define HEARTBEAT_RETRY_MS        3000
 #define COMMAND_POLL_INTERVAL_MS 6000
 
-// ---------- Median / Valid-only Filter ----------
-#define MEDIAN_SAMPLES      5
-#define VALID_WINDOW        5
+// ---------- Ultrasonic sampling / Median filter (เหมือน ESP_Chair_v2) ----------
+#define PING_GAP_MS        60     // ยิงห่างกันอย่างน้อยเท่านี้ (สเปก HC-SR04: >= 60 ms ต่อรอบ)
+#define ECHO_TIMEOUT_US 25000     // ~4.3 ม. — เกิน DIST_MAX_VALID แล้ว ไม่ต้องรอนานกว่านี้
+#define VALID_WINDOW        3     // median จากค่า valid ล่าสุดกี่ค่า (3 × 60 ms ≈ 0.18 วิ)
+#define MISS_LIMIT          5     // ไม่ได้ echo ติดกันเท่านี้ (~0.3 วิ) = ไม่มีวัตถุในระยะ
 
 // ============================================================
 // [แก้ข้อ 1] เกณฑ์ความเสี่ยง TUG — ต้องตรงกับ ESP_Chair และเว็บ
@@ -135,6 +147,26 @@ typedef struct struct_message {
   uint32_t runId;
   uint8_t  chairState;
 } struct_message;
+
+// ---------- รับ WiFi จากบอร์ดเก้าอี้ (ต้องเหมือน ESP_Chair เป๊ะ) ----------
+// บอร์ดนี้ไม่กระจาย SSID ตั้งค่าเอง แต่ยิง "NEED_WIFI" ไล่ไปทีละช่องจนเจอเก้าอี้
+// แล้วรับ ssid/password กลับมาต่อ — เจ้าหน้าที่จึงใส่รหัส WiFi ที่เดียวคือที่เก้าอี้
+#define TUG_WIFI_MAGIC "TUGWIFI"
+typedef struct struct_wifi_config {
+  char magic[8];
+  char ssid[33];
+  char pass[65];
+} struct_wifi_config;
+
+// ---------- ไล่หาช่องของบอร์ดเก้าอี้ ----------
+// ESP32 มีวิทยุชุดเดียว ESP-NOW จึงคุยได้เฉพาะเมื่ออยู่ช่องเดียวกัน
+// พอเก้าอี้ต่อ Router สำเร็จมันจะย้ายไปช่องของ Router ส่วนบอร์ดนี้ที่ยังไม่มี WiFi
+// ไม่มีทางรู้ว่าช่องไหน — จึงต้องวนไล่ทุกช่องแล้วเคาะถามไปเรื่อย ๆ
+#define PROVISION_CHANNEL_MIN   1
+#define PROVISION_CHANNEL_MAX   13     // ช่องที่ใช้ได้ในไทย (2.4GHz)
+#define PROVISION_DWELL_MS      300    // อยู่ช่องละเท่าไร — วนครบ 13 ช่อง ≈ 3.9 วิ
+#define PROVISION_RETRY_MS      45000  // ได้ค่ามาแล้วต่อไม่ติด นานเท่านี้ค่อยไล่หาใหม่
+#define RECOVERY_AP_AFTER_MS    180000 // 3 นาทีแล้วยังไม่ได้ WiFi → เปิด AP ให้เข้าไปกู้
 
 // ---------- สถานะของ Chair (ต้องตรงกับ enum SystemState ฝั่ง ESP_Chair เป๊ะ) ----------
 // ⚠️ ค่าตัวเลขวิ่งข้าม ESP-NOW ห้ามสลับลำดับหรือแทรกค่าใหม่ตรงกลางฝั่งเดียว
@@ -237,9 +269,27 @@ int   validHead   = 0;
 int   validCount  = 0;
 float lastValidDistance = DIST_TIMEOUT;
 bool  distanceHeld = false;
+unsigned long lastPingMs       = 0;
+uint8_t       missCount        = MISS_LIMIT;     // เริ่มที่ "ยังไม่เคยได้ echo"
+float         filteredDistance = DIST_TIMEOUT;   // ค่าที่ getDistance() คืนระหว่างรอบยิง
+
+// ---------- ค่าระยะตรวจจับที่ใช้อยู่จริง (ปรับจากเว็บได้ — ดู applyDetectConfig) ----------
+float       distDetectCm   = DIST_DETECT;
+Preferences cfgPrefs;
 
 // ---------- Chair link status ----------
 volatile unsigned long lastChairAck = 0;
+
+// ---------- สถานะการรับ WiFi จากเก้าอี้ ----------
+// callback ทำได้แค่ก๊อปค่าลง buffer กับตั้งธง งานที่แตะ WiFi ต้องทำในลูปเท่านั้น
+volatile bool      wifiCfgPending = false;
+struct_wifi_config wifiCfgInbox;
+
+uint8_t       provisionChannel = PROVISION_CHANNEL_MIN;
+unsigned long lastHopTime      = 0;
+unsigned long lastApplyTime    = 0;   // เวลาที่เพิ่งเอาค่าที่ได้ไปลองต่อ
+unsigned long lastOnlineMs     = 0;   // ครั้งสุดท้ายที่ WiFi ยังต่ออยู่จริง
+bool          recoveryApOn     = false;
 
 // ==========================================================
 // Utilities
@@ -282,7 +332,7 @@ float readDistanceRaw() {
   delayMicroseconds(10);
   digitalWrite(TRIG_PIN, LOW);
 
-  long duration = pulseIn(ECHO_PIN, HIGH, 30000);
+  long duration = pulseIn(ECHO_PIN, HIGH, ECHO_TIMEOUT_US);
   if (duration == 0) return DIST_TIMEOUT;
   return duration * 0.034 / 2.0;
 }
@@ -290,30 +340,34 @@ float readDistanceRaw() {
 // [แก้ข้อ 12] ตัวกรองแบบเอาเฉพาะค่า valid — เดิมบอร์ดนี้ยังใช้ median แบบเก่า
 // ที่เอา 999.0 (timeout) มาคิดเป็นระยะด้วย ทำให้ค่า median เด้งสูงผิดปกติ
 // และ "พลาดการตรวจจับ" ตอนผู้ทดสอบเดินผ่านจริง ๆ
-//   ① ยิงเซ็นเซอร์เป็นชุด เก็บเฉพาะค่าที่ valid (0 < d < DIST_MAX_VALID)
-//   ② หา median จาก ring buffer ของค่า valid ล่าสุด
-//   ③ ถ้ารอบนี้ไม่มีค่า valid เลย → คืนค่า valid ล่าสุด (hold last)
+//   ① ยิงทีละครั้ง เว้นอย่างน้อย PING_GAP_MS (สเปก HC-SR04: >= 60 ms ต่อรอบ)
+//      โค้ดเดิมยิง 5 ครั้งห่างกัน 0.5 ms — โมดูลที่ค้างขา ECHO นานเมื่อไม่เจอวัตถุจะไม่รับคำสั่งยิงถัดไป
+//      pulseIn จึงหมดเวลาทั้งชุด ค่าเลยค้าง "(hold)" เกือบตลอดเวลา
+//   ② เก็บเฉพาะค่าที่ valid ลง ring buffer แล้วหา median (ตัดค่าเด้งครั้งเดียวทิ้ง)
+//   ③ พลาดไม่กี่ครั้ง → ถือค่าเดิมไว้ (hold) · พลาดติดกัน MISS_LIMIT ครั้ง (~0.3 วิ) → ถือว่าไม่มีวัตถุ
+//      คืน DIST_TIMEOUT และล้างค่าเก่า — ไม่ค้างระยะของคนที่เดินผ่านไปแล้ว
+// ระหว่างรอบยิงคืนค่าที่กรองไว้ล่าสุดทันที ลูปจึงถูกบล็อกแค่ครั้งละ 1 ping (สูงสุด ~25 ms)
 float getDistance() {
-  int gotValid = 0;
+  unsigned long now = millis();
+  if (now - lastPingMs < PING_GAP_MS) return filteredDistance;   // ยังไม่ถึงรอบยิง — ใช้ค่าเดิม
+  lastPingMs = now;
 
-  for (int i = 0; i < MEDIAN_SAMPLES; i++) {
-    float raw = readDistanceRaw();
-
-    if (raw > 0.0 && raw < DIST_MAX_VALID) {
-      validWindow[validHead] = raw;
-      validHead = (validHead + 1) % VALID_WINDOW;
-      if (validCount < VALID_WINDOW) validCount++;
-      gotValid++;
+  float raw = readDistanceRaw();
+  if (!(raw > 0.0 && raw < DIST_MAX_VALID)) {
+    if (missCount < MISS_LIMIT && ++missCount >= MISS_LIMIT) {
+      validCount       = 0;
+      validHead        = 0;
+      filteredDistance = DIST_TIMEOUT;
     }
-
-    if (i < MEDIAN_SAMPLES - 1) delayMicroseconds(500);
+    distanceHeld = (missCount < MISS_LIMIT);   // พลาดไม่กี่ครั้ง = ยังถือค่าเดิมอยู่
+    return filteredDistance;
   }
 
-  if (gotValid == 0) {
-    distanceHeld = true;
-    return lastValidDistance;
-  }
+  missCount    = 0;
   distanceHeld = false;
+  validWindow[validHead] = raw;
+  validHead = (validHead + 1) % VALID_WINDOW;
+  if (validCount < VALID_WINDOW) validCount++;
 
   float tmp[VALID_WINDOW];
   for (int i = 0; i < validCount; i++) tmp[i] = validWindow[i];
@@ -329,7 +383,8 @@ float getDistance() {
   }
 
   lastValidDistance = tmp[validCount / 2];
-  return lastValidDistance;
+  filteredDistance  = lastValidDistance;
+  return filteredDistance;
 }
 
 // ==========================================================
@@ -496,12 +551,19 @@ bool sendHeartbeat() {
   // และเป็นทางที่หน้า live รู้ว่า "ผ่านจุดหมุนตัวแล้ว" ก่อนที่เก้าอี้จะว่างมาบอกเอง
   content.set("fields/light/stringValue",         lightName(currentLightPhase()));
   content.set("fields/chair_state/stringValue",   chairStateName(chairState));
+  // ค่าระยะที่ใช้อยู่จริง + ระยะที่อ่านได้ตอนนี้ ให้ส่วน "ตั้งค่าอุปกรณ์" บนเว็บ
+  // -1 = ไม่เคยได้รับ echo เลย (เซนเซอร์หลุด/หันผิดทาง) เว็บจะแสดงเป็นคำเตือนแทนตัวเลข
+  content.set("fields/cfg_detect_cm/doubleValue", distDetectCm);
+  content.set("fields/distance_cm/doubleValue",
+              lastValidDistance >= DIST_MAX_VALID ? -1.0 : (double)lastValidDistance);
+  // false = ช่วงนี้ไม่ได้รับเสียงสะท้อน (ปกติเมื่อไม่มีคนอยู่หน้าเซนเซอร์) — distance_cm เป็นค่าเก่า
+  content.set("fields/distance_live/booleanValue", missCount < MISS_LIMIT);
 
   if (!Firebase.Firestore.patchDocument(
         &fbdo, FIREBASE_PROJECT_ID, "(default)",
         "device_status/checkpoint", content.raw(),
         "online,last_seen,state,rssi,device,fw_version,uptime_sec,chair_online,"
-        "wifi_ssid,ap_ssid,light,chair_state")) {
+        "wifi_ssid,ap_ssid,light,chair_state,cfg_detect_cm,distance_cm,distance_live")) {
     Serial.println("  [Heartbeat] ❌ " + fbdo.errorReason());
     return false;
   }
@@ -513,6 +575,53 @@ long readIntField(FirebaseJson& payload, const char* path) {
   payload.get(result, path);
   // Firestore ส่ง integerValue มาเป็น string เสมอ
   return result.success ? result.to<String>().toInt() : 0;
+}
+
+// Firestore เก็บตัวเลขจากเว็บเป็น integerValue (จำนวนเต็ม) หรือ doubleValue (มีทศนิยม)
+// แล้วแต่ค่าที่ส่งมา — ต้องลองอ่านทั้งสองแบบ คืน NAN ถ้าไม่มี field นี้
+float readNumField(FirebaseJson& payload, const char* name) {
+  FirebaseJsonData result;
+  String base = String("fields/") + name;
+  payload.get(result, (base + "/integerValue").c_str());
+  if (result.success) return result.to<String>().toFloat();
+  payload.get(result, (base + "/doubleValue").c_str());
+  if (result.success) return result.to<String>().toFloat();
+  return NAN;
+}
+
+// ---------- ค่าระยะตรวจจับ: โหลดจาก NVS ตอนบูต ----------
+void loadDetectConfig() {
+  cfgPrefs.begin("tugcp", true);
+  float detect = cfgPrefs.getFloat("detect_cm", DIST_DETECT);
+  cfgPrefs.end();
+  if (detect >= CFG_DETECT_MIN_CM && detect <= CFG_DETECT_MAX_CM) distDetectCm = detect;
+  Serial.printf("  [Config] ระยะตรวจจับคน < %.0f ซม.\n", distDetectCm);
+}
+
+// ---------- ค่าระยะตรวจจับ: ใช้ค่าที่ตั้งจากเว็บ ----------
+// เรียกทุกครั้งที่อ่าน device_commands/checkpoint (ทุก 6 วิ — ไม่เคยเกิดระหว่าง CP_DETECTING)
+void applyDetectConfig(float detect) {
+  if (isnan(detect)) return;   // เว็บยังไม่เคยตั้งค่า
+  if (fabsf(detect - distDetectCm) < 0.05f) return;
+  if (currentState == CP_DETECTING) return;   // ห้ามเปลี่ยนเกณฑ์กลางรอบ — รอบ poll ถัดไปจะหยิบใหม่เอง
+
+  if (detect < CFG_DETECT_MIN_CM || detect > CFG_DETECT_MAX_CM) {
+    static float lastBad = NAN;   // เตือนครั้งเดียวต่อค่า ไม่ให้ log รก
+    if (detect != lastBad) {
+      lastBad = detect;
+      Serial.printf("  [Config] ⚠️  ไม่ใช้ค่าจากเว็บ (%.1f ซม.) — อยู่นอกช่วงที่รับได้\n", detect);
+    }
+    return;
+  }
+
+  distDetectCm   = detect;
+  debounceActive = false;
+  cfgPrefs.begin("tugcp", false);
+  cfgPrefs.putFloat("detect_cm", detect);
+  cfgPrefs.end();
+
+  Serial.printf("  [Config] ✅ ใช้ค่าจากเว็บ: ระยะตรวจจับคน < %.0f ซม.\n", detect);
+  heartbeatDue = true;   // ให้เว็บเห็นทันทีว่าบอร์ดใช้ค่าใหม่แล้ว
 }
 
 // [แก้ข้อ 8] รับคำสั่งรีเซ็ตจากเว็บได้เอง ไม่ต้องเดินไปกดปุ่มที่บอร์ด
@@ -529,6 +638,9 @@ void checkResetCommand() {
 
   FirebaseJson payload;
   payload.setJsonData(fbdo.payload());
+
+  // ค่าระยะตรวจจับที่ตั้งจากหน้าเว็บ (ส่วน "ตั้งค่าอุปกรณ์") — อยู่ในเอกสารเดียวกับคำสั่งรีเซ็ต
+  applyDetectConfig(readNumField(payload, "cfg_detect_cm"));
 
   long resetReq = readIntField(payload, "fields/reset_requested_at/integerValue");
   long resetAck = readIntField(payload, "fields/reset_handled_at/integerValue");
@@ -584,6 +696,22 @@ void OnDataSent(ESPNOW_SEND_CB_ARG, esp_now_send_status_t status) {
 }
 
 void OnDataRecv(ESPNOW_RECV_CB_ARG, const uint8_t *incomingData, int len) {
+  // --- แพ็กเก็ตตั้งค่า WiFi (ขนาดต่างจาก struct_message จึงแยกออกได้ตรงนี้) ---
+  if (len == sizeof(struct_wifi_config)) {
+    struct_wifi_config cfg;
+    memcpy(&cfg, incomingData, sizeof(cfg));
+    cfg.magic[sizeof(cfg.magic) - 1] = '\0';
+    cfg.ssid[sizeof(cfg.ssid) - 1]   = '\0';
+    cfg.pass[sizeof(cfg.pass) - 1]   = '\0';
+    // ยืนยันซ้ำด้วย magic เผื่อวันหน้ามี struct อื่นขนาดบังเอิญเท่ากัน
+    if (strcmp(cfg.magic, TUG_WIFI_MAGIC) != 0) return;
+
+    lastChairAck   = millis();
+    wifiCfgInbox   = cfg;
+    wifiCfgPending = true;   // ให้ลูปเป็นคนเอาไปต่อ ห้ามแตะ WiFi ใน callback
+    return;
+  }
+
   // ใช้ buffer แยกจาก msgData ที่ใช้ส่ง ไม่งั้นข้อมูลขารับจะไปทับข้อมูลขาส่ง
   struct_message in;
   if (len != sizeof(in)) return;
@@ -660,6 +788,67 @@ void OnDataRecv(ESPNOW_RECV_CB_ARG, const uint8_t *incomingData, int len) {
 }
 
 // ==========================================================
+// รับ WiFi จากบอร์ดเก้าอี้
+// ==========================================================
+
+// ต้องไล่หาช่องอยู่ไหม — เฉพาะตอนที่ยังไม่มีเน็ตจริง ๆ เท่านั้น
+//   • ต่อ WiFi ได้แล้ว                → ไม่ต้อง (และห้าม เพราะจะทำให้หลุด)
+//   • portal กำลังลองต่ออยู่           → ไม่ต้อง อย่าไปสลับช่องแทรกกลางคัน
+//   • กำลังเฝ้าคนเดินผ่าน (DETECTING) → ไม่ต้อง ห้ามรบกวนจังหวะจับเวลา
+//   • มีคนต่อเข้า AP กู้ภัยอยู่        → ไม่ต้อง การสลับช่องจะเตะช่างหลุดกลางคัน
+//   • เพิ่งได้ค่ามาลองต่อ              → รอ PROVISION_RETRY_MS ก่อน เผื่อรหัสถูกแต่ต่อช้า
+//
+// ⚠️ ข้อสำคัญ: ถ้าเคยต่อได้แล้วเน็ตแค่สะดุด "ห้ามไล่ช่อง" เด็ดขาด เพราะการสลับช่อง
+// จะไปตัด ESP-NOW กับเก้าอี้ที่ยังออนไลน์อยู่ ทั้งที่ portal จะลองต่อใหม่ให้เองใน 20 วิ
+// จะกลับไปไล่ช่องก็ต่อเมื่อขาดเน็ตนานเกิน WIFI_STALE_MS จริง ๆ (เช่นรหัส WiFi ถูกเปลี่ยน
+// ที่เก้าอี้ไปแล้ว บอร์ดนี้ต้องไปขอค่าใหม่)
+#define WIFI_STALE_MS 120000
+bool needsProvisioning() {
+  if (portal.isConnected() || portal.isConnecting()) return false;
+  if (currentState == CP_DETECTING)                  return false;
+  // เปิด AP กู้ภัยแล้วก็ยังไล่หาต่อ — ไม่งั้นถ้าแฟลชบอร์ดนี้ก่อนแล้วค่อยไปตั้งค่าเก้าอี้
+  // ทีหลัง มันจะเลิกหาถาวรจนกว่าจะรีบูต หยุดเฉพาะตอนมีคนต่อเข้า AP มาตั้งค่าจริง ๆ
+  if (recoveryApOn && WiFi.softAPgetStationNum() > 0) return false;
+  if (lastApplyTime && millis() - lastApplyTime < PROVISION_RETRY_MS) return false;
+  if (portal.hasSaved() && millis() - lastOnlineMs < WIFI_STALE_MS)   return false;
+  return true;
+}
+
+// วนไปทีละช่อง แล้วเคาะถามเก้าอี้ในทุกช่องที่ผ่าน
+// พอไปตรงกับช่องที่เก้าอี้อยู่ มันจะได้ยินและตอบกลับมาในจังหวะที่เรายังจอดอยู่ช่องนั้น
+void tickProvisioning() {
+  if (!needsProvisioning()) return;
+  unsigned long now = millis();
+  if (now - lastHopTime < PROVISION_DWELL_MS) return;
+  lastHopTime = now;
+
+  esp_wifi_set_channel(provisionChannel, WIFI_SECOND_CHAN_NONE);
+  sendCommand("NEED_WIFI", 0.0);
+
+  if (provisionChannel == PROVISION_CHANNEL_MAX) {
+    provisionChannel = PROVISION_CHANNEL_MIN;
+    Serial.println("  [Provision] ยังไม่เจอบอร์ดเก้าอี้ — วนไล่ช่องใหม่อีกรอบ");
+  } else {
+    provisionChannel++;
+  }
+}
+
+// เอาค่าที่ได้จากเก้าอี้ไปต่อจริง — เรียกจากลูปเท่านั้น
+void applyPendingWifi() {
+  if (!wifiCfgPending) return;
+  wifiCfgPending = false;
+  lastApplyTime  = millis();
+
+  Serial.println();
+  Serial.println("========================================");
+  Serial.print  ("  [Provision] ได้ค่า WiFi จากบอร์ดเก้าอี้ : ");
+  Serial.println(wifiCfgInbox.ssid);      // ไม่พิมพ์รหัสผ่านลง Serial
+  Serial.println("========================================");
+
+  portal.applyCredentials(String(wifiCfgInbox.ssid), String(wifiCfgInbox.pass));
+}
+
+// ==========================================================
 // WiFi ↔ บริการที่ต้องใช้เน็ต (NTP / Firebase)
 // ==========================================================
 // แยกออกมาเป็นฟังก์ชันเพราะ WiFi อาจต่อได้ "ทีหลัง" ตอนบูตไปแล้ว
@@ -687,7 +876,9 @@ void onWiFiConnected() {
     firebaseConfig.token_status_callback = tokenStatusCallback;
 
     Firebase.begin(&firebaseConfig, &auth);
-    Firebase.reconnectWiFi(true);
+    // false: TUGWiFiPortal เป็นคนต่อ WiFi ใหม่เอง ถ้าให้ Firebase สั่ง WiFi.reconnect() ซ้อน
+    // มันจะไปแย่งกับการไล่หาช่อง/การลองต่อของ portal
+    Firebase.reconnectWiFi(false);
     fbdo.setResponseSize(4096);
 
     firebaseStarted = true;
@@ -722,19 +913,28 @@ void setup() {
   //    เปิด SoftAP ค้างไว้ตลอด + ต่อ WiFi ที่จำไว้ให้อัตโนมัติ
   //    เปลี่ยน WiFi ได้จากหน้าเว็บ ไม่ต้องอัปโหลดโค้ดใหม่
   // ----------------------------------------------------------
-  portal.begin(AP_SSID, AP_PASSWORD, "TUG Checkpoint (จุดหมุนตัว 3 ม.)");
+  // startAp = false → บอร์ดนี้ไม่กระจาย SSID ตั้งค่า มีแต่บอร์ดเก้าอี้ที่กระจาย
+  // (AP จะถูกเปิดให้อัตโนมัติภายหลัง ถ้ารับค่าจากเก้าอี้ไม่สำเร็จภายใน 3 นาที)
+  loadDetectConfig();   // ค่าระยะตรวจจับที่ตั้งจากเว็บไว้ครั้งล่าสุด
+  portal.begin(AP_SSID, AP_PASSWORD, "TUG Checkpoint (จุดหมุนตัว 3 ม.)", false);
 
   Serial.print("  [ESP-NOW] MAC ของบอร์ดนี้ : ");
   Serial.println(WiFi.macAddress());   // เอาไปใส่ในตัวแปร checkpointMAC[] ของ ESP_Chair
 
-  Serial.print("  [WiFi] กำลังเชื่อมต่อเครือข่ายที่จดจำไว้");
-  unsigned long wifiStart = millis();
-  while (!portal.isConnected() && millis() - wifiStart < WIFI_TIMEOUT_MS) {
-    portal.handle();
-    driveLed();     // ต้องเรียกด้วย ไม่งั้นไฟจะค้างนิ่งแทนที่จะกระพริบตลอดช่วงบูต
-    delay(20);
+  // รอเฉพาะเมื่อเคยจำ WiFi ไว้ — บอร์ดใหม่ที่ยังไม่มีอะไรให้ต่อ ไม่ต้องยืนรอเปล่า ๆ
+  // 10 วิ เพราะยังไง WiFi ก็ต้องรอรับจากเก้าอี้ในลูปอยู่ดี
+  if (portal.hasSaved()) {
+    Serial.print("  [WiFi] กำลังเชื่อมต่อเครือข่ายที่จดจำไว้");
+    unsigned long wifiStart = millis();
+    while (!portal.isConnected() && millis() - wifiStart < WIFI_TIMEOUT_MS) {
+      portal.handle();
+      driveLed();   // ต้องเรียกด้วย ไม่งั้นไฟจะค้างนิ่งแทนที่จะกระพริบตลอดช่วงบูต
+      delay(20);
+    }
+    Serial.println();
+  } else {
+    Serial.println("  [WiFi] ยังไม่เคยตั้งค่า — จะขอค่า WiFi จากบอร์ดเก้าอี้ผ่าน ESP-NOW");
   }
-  Serial.println();
 
   if (portal.isConnected()) {
     wifiConnected = true;
@@ -750,12 +950,11 @@ void setup() {
     }
     Serial.println();
   } else {
-    Serial.println("  [WiFi] ⚠️  ยังไม่ได้เชื่อมต่อ!");
-    Serial.print  ("  ต่อมือถือ/โน้ตบุ๊กเข้า WiFi ชื่อ \"");
+    Serial.println("  [WiFi] ยังไม่ได้เชื่อมต่อ — จะไล่หาบอร์ดเก้าอี้เพื่อขอค่า WiFi");
+    Serial.println("         (ตั้งค่า WiFi ที่บอร์ดเก้าอี้ที่เดียวพอ ที่นี่ไม่ต้องทำอะไร)");
+    Serial.print  ("         ถ้าไม่สำเร็จภายใน 3 นาที จะเปิด AP สำรองชื่อ \"");
     Serial.print(AP_SSID);
-    Serial.println("\" เพื่อตั้งค่า");
-    Serial.println("  ⚠️  ESP-NOW อาจทำงานผิดพลาดหากอยู่คนละ channel กับ ESP_Chair");
-    Serial.println("      บอร์ดทั้งสองต้องต่อ WiFi 'วงเดียวกัน' เสมอ");
+    Serial.println("\" ให้ตั้งค่าเอง");
   }
 
   // ----------------------------------------------------------
@@ -808,11 +1007,26 @@ void loop() {
   unsigned long now = millis();
 
   // --- WiFi Setup Portal ---
-  // handle() เร็วมาก (แค่ตอบ HTTP/DNS ที่ค้างอยู่) แต่ "สแกน WiFi" กับ "ลองต่อใหม่"
-  // กินเวลาเป็นวินาที จึงต้องห้ามทำระหว่าง CP_DETECTING ด้วยเหตุผลเดียวกับ Firestore:
-  // บอร์ดอาจพลาดจังหวะที่ผู้ทดสอบเดินผ่าน
+  // portal เดินใน task ของตัวเองแล้ว (handle() เหลือไว้เป็นทางสำรองเท่านั้น)
+  // แต่ "สแกน WiFi" กับ "ลองต่อใหม่" ทำให้วิทยุกระโดดช่องเป็นวินาที จึงต้องห้ามทำ
+  // ระหว่าง CP_DETECTING — บอร์ดอาจพลาดจังหวะที่ผู้ทดสอบเดินผ่าน
   portal.setTimingCritical(currentState == CP_DETECTING);
   portal.handle();
+
+  // --- รับ WiFi จากบอร์ดเก้าอี้ ---
+  if (portal.isConnected()) lastOnlineMs = now;   // ใช้แยก "เน็ตสะดุด" ออกจาก "ไม่เคยต่อได้"
+  applyPendingWifi();     // ได้ค่ามาแล้ว → เอาไปต่อ (ทำก่อนไล่ช่อง จะได้หยุดไล่ทันที)
+  tickProvisioning();     // ยังไม่ได้ → วนเคาะถามไปทีละช่อง
+
+  // ทางกู้: ผ่านไป 3 นาทีแล้วยังไม่มี WiFi แปลว่า provision ไม่สำเร็จ (เก้าอี้ดับ /
+  // ยังไม่ได้ตั้งค่าเก้าอี้ / อยู่ไกลเกิน) ถ้าไม่เปิด AP ให้ บอร์ดนี้จะเข้าถึงไม่ได้เลย
+  // นอกจากถอดไปแฟลชใหม่ — ปกติจะไม่มีวันเห็น SSID นี้
+  if (!recoveryApOn && !portal.isConnected() && now > RECOVERY_AP_AFTER_MS) {
+    recoveryApOn = true;
+    Serial.println();
+    Serial.println("  [Provision] ⚠️  ยังไม่ได้ WiFi ใน 3 นาที — เปิด AP สำรองให้ตั้งค่าเอง");
+    portal.enableApNow();
+  }
 
   // สถานะเปลี่ยน = ดัน heartbeat ขึ้นเว็บทันที
   // สำคัญมากตอนออกจาก CP_DETECTING เพราะช่วงนั้นบอร์ดหยุดส่ง heartbeat ไปเลย
@@ -841,6 +1055,7 @@ void loop() {
     Serial.print(distance, 1);
     Serial.print(" cm");
     if (distanceHeld) Serial.print(" (hold)");
+    else if (distance >= DIST_TIMEOUT) Serial.print(" (no echo)");
     if (WiFi.status() != WL_CONNECTED)      Serial.print("  [WiFi: X]");
     if (firebaseReady && !Firebase.ready()) Serial.print("  [Firebase: pending]");
     Serial.println();
@@ -891,7 +1106,7 @@ void loop() {
         break;
       }
 
-      if (distance > 0.0 && distance < DIST_DETECT) {
+      if (distance > 0.0 && distance < distDetectCm) {
         if (!debounceActive) {
           debounceActive = true;
           debounceStart  = now;

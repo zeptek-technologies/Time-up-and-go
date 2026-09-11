@@ -22,7 +22,7 @@
 #include "addons/TokenHelper.h"
 #include "TUGWiFiPortal.h"
 
-#define FW_VERSION "chair-2.2.0"
+#define FW_VERSION "chair-2.4.1"
 
 // ============================================================
 // ⚙️  USER CONFIGURATION — แก้ไขค่าเหล่านี้ก่อนอัปโหลด
@@ -59,6 +59,14 @@
 // ---------- Distance Thresholds (cm) ----------
 #define DIST_SITTING       10.0   // นั่งอยู่ (วัตถุอยู่ภายใน 10 ซม.)
 #define DIST_STANDING      30.0   // ลุกขึ้นแล้ว (วัตถุไกลกว่า 30 ซม.)
+// สองค่าบนเป็น "ค่าเริ่มต้น" — เจ้าหน้าที่ปรับได้จากหน้าเว็บ (ตั้งค่าอุปกรณ์)
+// ค่าที่ใช้จริงอยู่ในตัวแปร distSittingCm / distStandingCm และถูกจำไว้ใน NVS
+// ⚠️ ช่วงค่าต้องตรงกับ LIMITS ใน gait-web/src/lib/deviceConfig.ts
+#define CFG_SIT_MIN_CM      3.0
+#define CFG_SIT_MAX_CM     60.0
+#define CFG_STAND_MIN_CM   10.0
+#define CFG_STAND_MAX_CM  150.0
+#define CFG_MIN_GAP_CM     10.0   // ระยะลุกต้องห่างจากระยะนั่งอย่างน้อยเท่านี้ (กันสถานะแกว่ง)
 #define DIST_MAX_VALID    400.0   // ระยะสูงสุดที่เป็นไปได้ของ ultrasonic
 #define DIST_TIMEOUT      999.0   // ค่าที่คืนเมื่อไม่มี echo
 
@@ -83,9 +91,11 @@
 #define COMMAND_POLL_INTERVAL_MS 4000   // ความถี่การเช็คคำสั่งจากเว็บ
 #define RETRY_UPLOAD_INTERVAL_MS 20000  // ความถี่การลองส่งผลที่ค้างใน NVS ซ้ำ
 
-// ---------- Median / Valid-only Filter ----------
-#define MEDIAN_SAMPLES      5     // จำนวนครั้งที่ยิงเซ็นเซอร์ต่อ 1 รอบ
-#define VALID_WINDOW        5     // เก็บค่า valid ล่าสุดกี่ค่าไว้ทำ median
+// ---------- Ultrasonic sampling / Median filter ----------
+#define PING_GAP_MS        60     // ยิงห่างกันอย่างน้อยเท่านี้ (สเปก HC-SR04: >= 60 ms ต่อรอบ)
+#define ECHO_TIMEOUT_US 25000     // ~4.3 ม. — เกิน DIST_MAX_VALID แล้ว ไม่ต้องรอนานกว่านี้
+#define VALID_WINDOW        3     // median จากค่า valid ล่าสุดกี่ค่า (3 × 60 ms ≈ 0.18 วิ)
+#define MISS_LIMIT          5     // ไม่ได้ echo ติดกันเท่านี้ (~0.3 วิ) = ไม่มีวัตถุในระยะ
 
 // ---------- Checkpoint Link Heartbeat (ms) ----------
 #define PING_INTERVAL_MS           2000
@@ -126,6 +136,20 @@ typedef struct struct_message {
   uint32_t runId;
   uint8_t  chairState;
 } struct_message;
+
+// ---------- แจก WiFi ให้ Checkpoint ผ่าน ESP-NOW ----------
+// บอร์ดนี้เป็นตัวเดียวที่กระจาย SSID ตั้งค่า เจ้าหน้าที่จึงใส่รหัส WiFi ครั้งเดียวที่นี่
+// แล้ว Checkpoint ขอค่ามาต่อเอง (คำสั่ง "NEED_WIFI") ไม่ต้องเข้าไปตั้งค่าอีกเครื่อง
+//
+// ใช้ struct แยกเพราะ ssid+password ใหญ่เกินกว่าจะยัดลง struct_message
+// ฝั่งรับแยกประเภทด้วย "ขนาดแพ็กเก็ต" (28 vs 106 ไบต์) แล้วยืนยันซ้ำด้วย magic
+// ⚠️ ต้องเหมือนกันเป๊ะกับฝั่ง ESP_Checkpoint
+#define TUG_WIFI_MAGIC "TUGWIFI"
+typedef struct struct_wifi_config {
+  char magic[8];   // "TUGWIFI"
+  char ssid[33];   // WiFi SSID ยาวได้ 32 ตัว + '\0'
+  char pass[65];   // WPA2 passphrase ยาวได้ 63 ตัว + '\0' (เผื่อ PSK 64 ตัว)
+} struct_wifi_config;
 
 // ---------- State Machine ----------
 // ⚠️ ค่าตัวเลขของ enum นี้ถูกส่งข้าม ESP-NOW (field chairState) — ห้ามสลับลำดับ
@@ -176,6 +200,14 @@ bool ntpStarted      = false;   // configTime() ถูกเรียกไป�
 uint32_t currentRunId   = 0;    // เลขรอบ ใช้กันแพ็กเก็ตค้าง
 uint32_t testStartEpoch = 0;    // เวลาเริ่มทดสอบ (epoch วินาที) ไว้ใส่ในผลลัพธ์
 
+// ---------- ค่าระยะที่ใช้อยู่จริง (ปรับจากเว็บได้ — ดู applyDistanceConfig) ----------
+float distSittingCm  = DIST_SITTING;
+float distStandingCm = DIST_STANDING;
+
+// epoch ที่เข้าสถานะปัจจุบัน — เว็บใช้นับถอยหลังช่วง COOLDOWN (0 = ยังไม่ sync NTP)
+// ถูกเขียนจาก setState() ซึ่งเรียกได้ทั้งจากลูปและจาก callback ของ ESP-NOW
+volatile uint32_t stateSinceEpoch = 0;
+
 // ---------- [แก้ข้อ 4,5] ข้อมูลผู้เข้าทดสอบ / session / trial ----------
 // เว็บเป็นคนกำหนดค่าเหล่านี้ผ่าน device_commands/chair
 // ถ้าเว็บยังไม่ได้เขียนมา จะใช้ค่า default เพื่อให้ระบบยังทดสอบได้
@@ -190,10 +222,19 @@ int   validHead   = 0;
 int   validCount  = 0;
 float lastValidDistance = DIST_TIMEOUT;
 bool  distanceHeld = false;
+unsigned long lastPingMs       = 0;
+uint8_t       missCount        = MISS_LIMIT;     // เริ่มที่ "ยังไม่เคยได้ echo"
+float         filteredDistance = DIST_TIMEOUT;   // ค่าที่ getDistance() คืนระหว่างรอบยิง
 
 // ---------- Checkpoint link status ----------
 volatile unsigned long lastCheckpointAck = 0;
 bool          checkpointOnlinePrev = false;
+
+// Checkpoint ขอ WiFi มา — ตั้งธงใน callback แล้วไปส่งจริงในลูป
+// (ห้ามยิง ESP-NOW ซ้อนอยู่ใน callback ของ ESP-NOW เอง)
+volatile bool wifiShareRequested = false;
+unsigned long lastWifiShare = 0;
+#define WIFI_SHARE_MIN_GAP_MS 500   // กันตอบรัวเมื่อ Checkpoint ยิงถามหลายช่อง
 
 // ---------- [แก้ข้อ 11] บัฟเฟอร์ผลที่ยังส่งไม่สำเร็จ (เก็บลง NVS) ----------
 // ถ้าเน็ตหลุดตอนจบการทดสอบ ผลจะถูกเก็บลงหน่วยความจำถาวรของ ESP32
@@ -229,6 +270,7 @@ uint8_t       pendingCount = 0;
 typedef struct {
   uint8_t  state;             // SystemState ณ ตอนที่ใส่คิว
   uint32_t stateSeq;          // เลขลำดับ ไว้ไล่ log ว่าใบไหนคือใบไหน
+  uint32_t stateSince;        // epoch ที่เข้าสถานะนี้ (เว็บใช้นับถอยหลังช่วงพัก)
   uint32_t queuedAtMs;        // millis() ตอนใส่คิว — ใช้คำนวณ latency
   uint16_t trialNo;
   bool     armed;
@@ -289,36 +331,40 @@ float readDistanceRaw() {
   delayMicroseconds(10);
   digitalWrite(TRIG_PIN, LOW);
 
-  long duration = pulseIn(ECHO_PIN, HIGH, 30000);
+  long duration = pulseIn(ECHO_PIN, HIGH, ECHO_TIMEOUT_US);
   if (duration == 0) return DIST_TIMEOUT;
   return duration * 0.034 / 2.0;
 }
 
 // Median filter แบบเอาเฉพาะค่า valid (ไม่เอา 999.0 timeout มาคิดเป็นระยะ)
-//   ① ยิงเซ็นเซอร์เป็นชุด เก็บเฉพาะค่าที่ valid (0 < d < DIST_MAX_VALID)
-//   ② เก็บลง ring buffer ของค่า valid ล่าสุด แล้วหา median
-//   ③ ถ้ารอบนี้ไม่มีค่า valid เลย → คืนค่า valid ล่าสุด (hold last)
+//   ① ยิงทีละครั้ง เว้นอย่างน้อย PING_GAP_MS (สเปก HC-SR04: >= 60 ms ต่อรอบ)
+//      โค้ดเดิมยิง 5 ครั้งห่างกัน 0.5 ms — โมดูลที่ค้างขา ECHO นานเมื่อไม่เจอวัตถุจะไม่รับคำสั่งยิงถัดไป
+//      pulseIn จึงหมดเวลาทั้งชุด ค่าเลยค้าง "(hold)" เกือบตลอดเวลา
+//   ② เก็บเฉพาะค่าที่ valid (0 < d < DIST_MAX_VALID) ลง ring buffer แล้วหา median (ตัดค่าเด้งครั้งเดียวทิ้ง)
+//   ③ พลาดไม่กี่ครั้ง → ถือค่าเดิมไว้ (hold) · พลาดติดกัน MISS_LIMIT ครั้ง (~0.3 วิ) → ถือว่าไม่มีวัตถุ
+//      คืน DIST_TIMEOUT และล้างค่าเก่า — ไม่ค้างระยะตอนนั่งไว้ทั้งที่ผู้ทดสอบลุกไปแล้ว
+// ระหว่างรอบยิงคืนค่าที่กรองไว้ล่าสุดทันที ลูปจึงถูกบล็อกแค่ครั้งละ 1 ping (สูงสุด ~25 ms)
 float getDistance() {
-  int gotValid = 0;
+  unsigned long now = millis();
+  if (now - lastPingMs < PING_GAP_MS) return filteredDistance;   // ยังไม่ถึงรอบยิง — ใช้ค่าเดิม
+  lastPingMs = now;
 
-  for (int i = 0; i < MEDIAN_SAMPLES; i++) {
-    float raw = readDistanceRaw();
-
-    if (raw > 0.0 && raw < DIST_MAX_VALID) {
-      validWindow[validHead] = raw;
-      validHead = (validHead + 1) % VALID_WINDOW;
-      if (validCount < VALID_WINDOW) validCount++;
-      gotValid++;
+  float raw = readDistanceRaw();
+  if (!(raw > 0.0 && raw < DIST_MAX_VALID)) {
+    if (missCount < MISS_LIMIT && ++missCount >= MISS_LIMIT) {
+      validCount       = 0;
+      validHead        = 0;
+      filteredDistance = DIST_TIMEOUT;
     }
-
-    if (i < MEDIAN_SAMPLES - 1) delayMicroseconds(500);
+    distanceHeld = (missCount < MISS_LIMIT);   // พลาดไม่กี่ครั้ง = ยังถือค่าเดิมอยู่
+    return filteredDistance;
   }
 
-  if (gotValid == 0) {
-    distanceHeld = true;
-    return lastValidDistance;
-  }
+  missCount    = 0;
   distanceHeld = false;
+  validWindow[validHead] = raw;
+  validHead = (validHead + 1) % VALID_WINDOW;
+  if (validCount < VALID_WINDOW) validCount++;
 
   float tmp[VALID_WINDOW];
   for (int i = 0; i < validCount; i++) tmp[i] = validWindow[i];
@@ -334,7 +380,8 @@ float getDistance() {
   }
 
   lastValidDistance = tmp[validCount / 2];
-  return lastValidDistance;
+  filteredDistance  = lastValidDistance;
+  return filteredDistance;
 }
 
 // ==========================================================
@@ -494,6 +541,7 @@ void queueLiveStatus(SystemState state) {
   // จะได้ไม่ไปถือ spinlock ค้างระหว่างที่ยัง strncpy อยู่
   LiveStatusEvent e;
   e.state            = (uint8_t)state;
+  e.stateSince       = stateSinceEpoch;
   e.queuedAtMs       = millis();
   e.trialNo          = trialNo;
   e.armed            = armed;
@@ -555,13 +603,24 @@ bool publishChairStatus(const LiveStatusEvent& event) {
   content.set("fields/trial_no/integerValue",           String((long)event.trialNo));
   content.set("fields/wifi_ssid/stringValue",           WiFi.SSID());
   content.set("fields/ap_ssid/stringValue",             portal.apSSID());
+  // สำหรับนับถอยหลังช่วงพักบนจอสถานะ — เว็บคำนวณ state_since + cooldown_sec เอง
+  content.set("fields/state_since/integerValue",        String((long)event.stateSince));
+  content.set("fields/cooldown_sec/integerValue",       String((long)(COOLDOWN_DURATION / 1000)));
+  // ค่าระยะที่ใช้อยู่จริง + ระยะที่อ่านได้ตอนนี้ (อ่านสด) ให้ส่วน "ตั้งค่าอุปกรณ์" บนเว็บ
+  // -1 = ไม่เคยได้รับ echo เลย (เซนเซอร์หลุด/หันผิดทาง) เว็บจะแสดงเป็นคำเตือนแทนตัวเลข
+  content.set("fields/cfg_sit_cm/doubleValue",          distSittingCm);
+  content.set("fields/cfg_stand_cm/doubleValue",        distStandingCm);
+  content.set("fields/distance_cm/doubleValue",
+              lastValidDistance >= DIST_MAX_VALID ? -1.0 : (double)lastValidDistance);
+  // false = ช่วงนี้ไม่ได้รับเสียงสะท้อน — distance_cm ข้างบนเป็นค่าเก่า เว็บต้องไม่แสดงเหมือนค่าสด
+  content.set("fields/distance_live/booleanValue",      missCount < MISS_LIMIT);
 
   if (!Firebase.Firestore.patchDocument(
         &fbdo, FIREBASE_PROJECT_ID, "(default)",
         "device_status/chair", content.raw(),
         "online,last_seen,state,rssi,device,fw_version,uptime_sec,"
         "checkpoint_online,pending_uploads,armed,subject_key,session_id,trial_no,"
-        "wifi_ssid,ap_ssid")) {
+        "wifi_ssid,ap_ssid,state_since,cooldown_sec,cfg_sit_cm,cfg_stand_cm,distance_cm,distance_live")) {
     Serial.println("  [LIVE] ❌ publish ไม่สำเร็จ : " + fbdo.errorReason());
     return false;
   }
@@ -598,8 +657,9 @@ bool pumpLiveStatus() {
 //    การ esp_now_send() ซ้อนอยู่ใน callback ของตัวเองไม่ปลอดภัย
 void setState(SystemState next) {
   if (currentState == next) return;
-  currentState   = next;
-  stateNotifyDue = true;
+  currentState    = next;
+  stateNotifyDue  = true;
+  stateSinceEpoch = getEpoch();   // ก่อนใส่คิวเสมอ — ใบในคิวจะได้ถือเวลาที่ถูกต้อง
   queueLiveStatus(next);
 }
 
@@ -619,6 +679,71 @@ void readStringField(FirebaseJson& payload, const char* path, char* dest, size_t
   if (v.length() == 0) return;
   strncpy(dest, v.c_str(), len - 1);
   dest[len - 1] = '\0';
+}
+
+// Firestore เก็บตัวเลขจากเว็บเป็น integerValue (จำนวนเต็ม) หรือ doubleValue (มีทศนิยม)
+// แล้วแต่ค่าที่ส่งมา — ต้องลองอ่านทั้งสองแบบ คืน NAN ถ้าไม่มี field นี้
+float readNumField(FirebaseJson& payload, const char* name) {
+  FirebaseJsonData result;
+  String base = String("fields/") + name;
+  payload.get(result, (base + "/integerValue").c_str());
+  if (result.success) return result.to<String>().toFloat();
+  payload.get(result, (base + "/doubleValue").c_str());
+  if (result.success) return result.to<String>().toFloat();
+  return NAN;
+}
+
+// ---------- ค่าระยะเซนเซอร์: โหลดจาก NVS ตอนบูต ----------
+void loadDistanceConfig() {
+  prefs.begin("tug", true);
+  float sit   = prefs.getFloat("sit_cm",   DIST_SITTING);
+  float stand = prefs.getFloat("stand_cm", DIST_STANDING);
+  prefs.end();
+  // ค่าใน flash เพี้ยนหรืออยู่นอกช่วง → ใช้ค่าเริ่มต้นแทน
+  if (sit >= CFG_SIT_MIN_CM && sit <= CFG_SIT_MAX_CM &&
+      stand >= CFG_STAND_MIN_CM && stand <= CFG_STAND_MAX_CM &&
+      stand - sit >= CFG_MIN_GAP_CM) {
+    distSittingCm  = sit;
+    distStandingCm = stand;
+  }
+  Serial.printf("  [Config] ระยะนั่ง <= %.0f ซม. / ระยะลุก > %.0f ซม.\n", distSittingCm, distStandingCm);
+}
+
+// ---------- ค่าระยะเซนเซอร์: ใช้ค่าที่ตั้งจากเว็บ ----------
+// เรียกจาก checkCommands() ทุกครั้งที่อ่าน device_commands/chair (ทุก 4 วิ)
+// ค่าที่ขอค้างอยู่ใน Firestore เสมอ ถ้ารอบนี้ยังใช้ไม่ได้ (กำลังทดสอบ) รอบ poll ถัดไปจะหยิบใหม่เอง
+void applyDistanceConfig(float sit, float stand) {
+  if (isnan(sit) || isnan(stand)) return;   // เว็บยังไม่เคยตั้งค่า
+  if (fabsf(sit - distSittingCm) < 0.05f && fabsf(stand - distStandingCm) < 0.05f) return;
+
+  // ห้ามเปลี่ยนเกณฑ์กลางรอบ — จุดเริ่มกับจุดจบของรอบเดียวกันต้องวัดด้วยเกณฑ์เดียวกัน
+  if (currentState == STATE_RUNNING || currentState == STATE_RETURNING) return;
+
+  bool valid = sit >= CFG_SIT_MIN_CM && sit <= CFG_SIT_MAX_CM &&
+               stand >= CFG_STAND_MIN_CM && stand <= CFG_STAND_MAX_CM &&
+               stand - sit >= CFG_MIN_GAP_CM;
+  if (!valid) {
+    // เตือนครั้งเดียวต่อค่า ไม่ให้ log รกทุก 4 วิ (เว็บตรวจค่าก่อนบันทึกอยู่แล้ว กรณีนี้แทบไม่เกิด)
+    static float lastBadSit = NAN, lastBadStand = NAN;
+    if (sit != lastBadSit || stand != lastBadStand) {
+      lastBadSit = sit;
+      lastBadStand = stand;
+      Serial.printf("  [Config] ⚠️  ไม่ใช้ค่าจากเว็บ (นั่ง %.1f / ลุก %.1f ซม.) — อยู่นอกช่วงที่รับได้\n", sit, stand);
+    }
+    return;
+  }
+
+  distSittingCm  = sit;
+  distStandingCm = stand;
+  debounceActive = false;   // เกณฑ์เปลี่ยน = เริ่มนับ debounce ใหม่ ไม่ใช้ของเกณฑ์เดิม
+
+  prefs.begin("tug", false);
+  prefs.putFloat("sit_cm",   sit);
+  prefs.putFloat("stand_cm", stand);
+  prefs.end();
+
+  Serial.printf("  [Config] ✅ ใช้ค่าจากเว็บ: ระยะนั่ง <= %.0f ซม. / ระยะลุก > %.0f ซม.\n", sit, stand);
+  queueLiveStatus(currentState);   // ให้เว็บเห็นทันทีว่าบอร์ดใช้ค่าใหม่แล้ว
 }
 
 // forward declarations (ฟังก์ชันเหล่านี้ถูกเรียกก่อนจุดที่นิยามไว้)
@@ -672,6 +797,9 @@ void checkCommands() {
   // metadata เปลี่ยน = ใส่คิวสถานะเดิมซ้ำ เพื่อให้เว็บเห็นชื่อ session/subject ใหม่
   // โดยไม่ต้องรอ heartbeat รอบถัดไป (handoff 6.2 ข้อ 8)
   if (metaChanged) queueLiveStatus(currentState);
+
+  // ค่าระยะเซนเซอร์ที่ตั้งจากหน้าเว็บ (ส่วน "ตั้งค่าอุปกรณ์")
+  applyDistanceConfig(readNumField(payload, "cfg_sit_cm"), readNumField(payload, "cfg_stand_cm"));
 
   long resetReq = readIntField(payload, "fields/reset_requested_at/integerValue");
   long resetAck = readIntField(payload, "fields/reset_handled_at/integerValue");
@@ -772,6 +900,12 @@ void OnDataRecv(ESPNOW_RECV_CB_ARG, const uint8_t *incomingData, int len) {
   memcpy(&in, incomingData, sizeof(in));
   in.command[sizeof(in.command) - 1] = '\0';
 
+  // Checkpoint ยังไม่มี WiFi และกำลังไล่หาช่องอยู่ — จำไว้ว่าต้องส่งค่าให้
+  if (strcmp(in.command, "NEED_WIFI") == 0) {
+    wifiShareRequested = true;
+    return;
+  }
+
   if (strcmp(in.command, "CHECKPOINT") == 0 && currentState == STATE_RUNNING) {
     // [แก้ข้อ 10] รับเฉพาะแพ็กเก็ตของรอบปัจจุบัน กันสัญญาณค้างจากรอบก่อน
     if (in.runId != currentRunId) {
@@ -802,6 +936,28 @@ void sendCommand(const char* cmd, float t) {
   msgData.runId      = currentRunId;
   msgData.chairState = (uint8_t)currentState;   // ไฟที่ Checkpoint ขับตามค่านี้
   esp_now_send(checkpointMAC, (uint8_t *)&msgData, sizeof(msgData));
+}
+
+// ส่ง WiFi ที่บอร์ดนี้ใช้อยู่ให้ Checkpoint — เรียกจากลูปเท่านั้น
+// ยิงตรงไปที่ MAC ของ Checkpoint จึงถูกเข้ารหัสด้วย LMK เหมือนคำสั่งอื่น ๆ
+void shareWifiWithCheckpoint() {
+  String ssid = portal.currentSsid();
+  if (ssid.length() == 0) {
+    Serial.println("  [WiFi-Share] Checkpoint ขอค่ามา แต่บอร์ดนี้ยังไม่มี WiFi ให้แจก");
+    return;
+  }
+  String pass = portal.currentPass();
+
+  struct_wifi_config cfg;
+  memset(&cfg, 0, sizeof(cfg));
+  strncpy(cfg.magic, TUG_WIFI_MAGIC, sizeof(cfg.magic) - 1);
+  strncpy(cfg.ssid,  ssid.c_str(),   sizeof(cfg.ssid) - 1);
+  strncpy(cfg.pass,  pass.c_str(),   sizeof(cfg.pass) - 1);
+
+  esp_now_send(checkpointMAC, (uint8_t *)&cfg, sizeof(cfg));
+
+  Serial.print("  [WiFi-Share] ส่งค่า WiFi ให้ Checkpoint : ");
+  Serial.println(ssid);   // ไม่พิมพ์รหัสผ่านลง Serial
 }
 
 // บอก Checkpoint ว่าเก้าอี้เปลี่ยนขั้นตอนแล้ว เพื่อให้ไฟ RGB เปลี่ยนสีทันที
@@ -905,7 +1061,9 @@ void onWiFiConnected() {
     firebaseConfig.token_status_callback = tokenStatusCallback;
 
     Firebase.begin(&firebaseConfig, &auth);
-    Firebase.reconnectWiFi(true);
+    // false: TUGWiFiPortal เป็นคนต่อ WiFi ใหม่เอง ถ้าให้ Firebase สั่ง WiFi.reconnect() ซ้อน
+    // วิทยุจะสแกนหาวงเดิมถี่ขึ้น AP ตั้งค่าหลุด และจังหวะพักการลองต่อของ portal ใช้ไม่ได้
+    Firebase.reconnectWiFi(false);
     fbdo.setResponseSize(4096);
 
     firebaseStarted = true;
@@ -935,7 +1093,8 @@ void setup() {
   Serial.print  ("  Firmware: "); Serial.println(FW_VERSION);
   Serial.println("========================================");
 
-  loadPending();   // กู้ผลที่ค้างจากรอบก่อน (ถ้ามี) ขึ้นมาจาก NVS
+  loadPending();          // กู้ผลที่ค้างจากรอบก่อน (ถ้ามี) ขึ้นมาจาก NVS
+  loadDistanceConfig();   // ค่าระยะนั่ง/ลุกที่ตั้งจากเว็บไว้ครั้งล่าสุด
 
   // ----------------------------------------------------------
   // ① WiFi Setup Portal (ต้องทำก่อน ESP-NOW เพราะเป็นคนตั้งโหมด WiFi)
@@ -1052,9 +1211,9 @@ void loop() {
   bool timingCritical = (currentState == STATE_RETURNING);
 
   // --- WiFi Setup Portal ---
-  // handle() ทำงานเร็ว (ตอบ HTTP/DNS ที่ค้างอยู่เท่านั้น) เรียกได้ทุกรอบ
-  // แต่ "สแกน WiFi" กับ "ลองต่อใหม่" กินเวลาเป็นวินาที จึงบอกให้เลื่อนออกไป
-  // ตลอดช่วงที่กำลังจับเวลา ไม่งั้นเวลาที่วัดได้จะเพี้ยนและ ESP-NOW จะหลุด
+  // portal เดินใน task ของตัวเองแล้ว (handle() เหลือไว้เป็นทางสำรองเท่านั้น)
+  // ลูปแค่บอกว่าช่วงไหนห้าม "สแกน WiFi" กับ "ลองต่อใหม่" — สองอย่างนี้ทำให้วิทยุ
+  // กระโดดช่องเป็นวินาที ถ้าเกิดตอนจับเวลา ESP-NOW จะหลุดและเวลาที่วัดได้จะเพี้ยน
   portal.setTimingCritical(currentState == STATE_RUNNING ||
                            currentState == STATE_RETURNING);
   portal.handle();
@@ -1093,6 +1252,15 @@ void loop() {
     notifyCheckpointState();
   }
 
+  // --- แจก WiFi ให้ Checkpoint เมื่อมันร้องขอ ---
+  // ไม่ทำระหว่างจับเวลา: จังหวะนั้น Checkpoint กำลังเฝ้าคนเดินผ่าน ไม่ควรให้มันไป
+  // สลับช่อง/ต่อ WiFi กลางคัน (และรอบที่กำลังทดสอบก็แปลว่าลิงก์ใช้งานได้อยู่แล้ว)
+  if (wifiShareRequested && !timingCritical && now - lastWifiShare >= WIFI_SHARE_MIN_GAP_MS) {
+    wifiShareRequested = false;
+    lastWifiShare = now;
+    shareWifiWithCheckpoint();
+  }
+
   // --- Periodic status print ---
   if (now - lastPrintTime >= SERIAL_INTERVAL_MS) {
     Serial.print("[");
@@ -1101,6 +1269,7 @@ void loop() {
     Serial.print(distance, 1);
     Serial.print(" cm");
     if (distanceHeld) Serial.print(" (hold)");
+    else if (distance >= DIST_TIMEOUT) Serial.print(" (no echo)");
     Serial.print(cpOnline ? "  [Checkpoint: ONLINE]" : "  [Checkpoint: OFFLINE]");
     if (WiFi.status() != WL_CONNECTED)          Serial.print("  [WiFi: X]");
     if (firebaseReady && !Firebase.ready())     Serial.print("  [Firebase: pending]");
@@ -1146,7 +1315,7 @@ void loop() {
 
     // ---- CALIBRATE: อ่านเซนเซอร์ครั้งแรกเพื่อดูว่ามีคนนั่งอยู่ไหม ----
     case STATE_CALIBRATE:
-      if (distance <= DIST_SITTING) {
+      if (distance <= distSittingCm) {
         setState(STATE_READY);
         Serial.println("  [CALIBRATE] Chair occupied -> READY");
       } else {
@@ -1158,7 +1327,7 @@ void loop() {
 
     // ---- WAIT_SIT: เก้าอี้ว่าง รอคนมานั่ง ----
     case STATE_WAIT_SIT:
-      if (distance <= DIST_SITTING) {
+      if (distance <= distSittingCm) {
         if (!debounceActive) {
           debounceActive = true;
           debounceStart  = now;
@@ -1178,7 +1347,9 @@ void loop() {
       // ถ้าเปิด REQUIRE_WEB_START ต้องรอเจ้าหน้าที่กด Start บนเว็บก่อน
       if (!armed) { debounceActive = false; break; }
 
-      if (distance > DIST_STANDING && distance < DIST_MAX_VALID) {
+      // DIST_TIMEOUT (ไม่ได้ echo ติดกัน ~0.3 วิ) นับเป็น "ลุกแล้ว" ด้วย — หลังลุก เซนเซอร์มักหันเจอที่โล่ง
+      // ถ้าตัดค่านี้ทิ้งเหมือนเดิม คนที่ลุกแล้วเซนเซอร์มองไม่เห็นอะไรเลยจะไม่มีวันเริ่มจับเวลา
+      if (distance > distStandingCm) {
         if (!debounceActive) {
           debounceActive = true;
           debounceStart  = now;
@@ -1225,7 +1396,7 @@ void loop() {
         break;
       }
 
-      if (distance <= DIST_SITTING) {
+      if (distance <= distSittingCm) {
         if (!debounceActive) {
           debounceActive = true;
           debounceStart  = now;
