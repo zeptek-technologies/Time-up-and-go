@@ -9,7 +9,7 @@ import type { GaitLabel } from "./classifier";
 const EXPLAINS: Record<Exclude<GaitLabel, "Normal">, string[]> = {
   // ก้าวสั้น แกว่งแขนน้อย ตัวโน้มไปหน้า
   Parkinsonian: ["parkinsons"],
-  // อ่อนแรงครึ่งซีก — ขาสองข้างทำงานไม่เท่ากัน แขนข้างหนึ่งงอแนบตัว
+  // อ่อนแรงครึ่งซีก - ขาสองข้างทำงานไม่เท่ากัน แขนข้างหนึ่งงอแนบตัว
   Hemiplegic: ["stroke"],
   // เท้าตก ต้องยกเข่าสูงเพื่อให้ปลายเท้าพ้นพื้น
   Steppage: ["peripheral-neuropathy", "multiple-sclerosis"],
@@ -48,7 +48,7 @@ export function assessConsistency(
       key: "no-camera",
       headline: "รอบนี้ไม่มีผลจากกล้อง",
       detail: relevant.length
-        ? "มีโรคประจำตัวที่กระทบการเดินบันทึกไว้ — ควรวิเคราะห์ท่าเดินในรอบถัดไป"
+        ? "มีโรคประจำตัวที่กระทบการเดินบันทึกไว้ - ควรวิเคราะห์ท่าเดินในรอบถัดไป"
         : "ใช้เวลาที่ทำได้เป็นเกณฑ์หลักสำหรับรอบนี้",
       matched: [],
     };
@@ -60,7 +60,7 @@ export function assessConsistency(
       return {
         key: "match",
         headline: "สอดคล้องกับโรคประจำตัวที่บันทึกไว้",
-        detail: "ท่าเดินที่กล้องเห็นตรงกับประวัติ — ใช้ติดตามความเปลี่ยนแปลงของอาการได้",
+        detail: "ท่าเดินที่กล้องเห็นตรงกับประวัติ - ใช้ติดตามความเปลี่ยนแปลงของอาการได้",
         matched,
       };
     }

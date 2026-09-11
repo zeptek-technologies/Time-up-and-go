@@ -14,7 +14,7 @@ export default function Pagination({ label, total, start, end, page, pageCount, 
   return (
     <nav className="data-pagination" aria-label={`แบ่งหน้า${label}`}>
       <span className="data-pagination__range" role="status" aria-live="polite">
-        {total ? `${start}–${end} จาก ${total} รายการ` : "0 รายการ"}
+        {total ? `${start}-${end} จาก ${total} รายการ` : "0 รายการ"}
       </span>
       <label className="data-pagination__size">
         <span>ต่อหน้า</span>

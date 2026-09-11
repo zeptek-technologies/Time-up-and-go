@@ -7,6 +7,7 @@ import PatientsSection from "./components/PatientsSection";
 import RecordsSection from "./components/RecordsSection";
 import DiseaseSection from "./components/DiseaseSection";
 import GuideSection from "./components/GuideSection";
+import DeviceSettingsSection from "./components/DeviceSettingsSection";
 import LiveStatusPage from "./components/LiveStatusPage";
 import PatientManagementPage from "./components/PatientManagementPage";
 import PendingUploadsBanner from "./components/PendingUploadsBanner";
@@ -108,6 +109,9 @@ function DashboardApp() {
         </section>
         <section id="sec-guide" className="page-block">
           <GuideSection />
+        </section>
+        <section id="sec-devices" className="page-block">
+          <DeviceSettingsSection />
         </section>
       </main>
     </div>

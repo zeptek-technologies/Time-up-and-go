@@ -56,7 +56,7 @@ textarea { resize: none; min-height: 100px; }
 .stat-rail { border-radius: var(--r-panel); background: var(--clr-surface); }
 .stat-figure { padding: 20px 26px; }
 .stat-figure__value { font-size: 1.85rem; }
-#sec-patients, #sec-records, #sec-disease, #sec-guide { padding: 26px; background: var(--clr-surface); border: var(--rule); border-radius: var(--r-panel); }
+#sec-patients, #sec-records, #sec-disease, #sec-guide, #sec-devices { padding: 26px; background: var(--clr-surface); border: var(--rule); border-radius: var(--r-panel); }
 .patients-grid { box-shadow: none; background: var(--clr-primary-50); }
 .patient-card { border-radius: var(--r-field); background: var(--clr-surface); }
 .active-patient-bar { border-radius: var(--r-field); background: var(--clr-primary-50); margin-top: 18px; border-color: var(--clr-primary-200); }
@@ -110,7 +110,7 @@ textarea { resize: none; min-height: 100px; }
   .console__dist { padding: 24px; }
   .stat-figure { padding: 16px; }
   .stat-figure__value { font-size: 1.45rem; }
-  #sec-patients, #sec-records, #sec-disease, #sec-guide { padding: 20px 16px; }
+  #sec-patients, #sec-records, #sec-disease, #sec-guide, #sec-devices { padding: 20px 16px; }
   .app-header__inner { padding-inline: 18px; }
   .workspace-caption { display: none; }
   .section-header__title { font-size: 1.08rem; }
@@ -140,6 +140,115 @@ textarea { resize: none; min-height: 100px; }
   .app-shell { padding-left: 0; }
   .app-header, .workspace-intro > .btn { display: none; }
   .page-main { max-width: none; padding: 0; }
+}
+
+/* Minimal device status: one quiet row, with color reserved for state. */
+.app-header__status {
+  justify-self: stretch;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.app-header__status-heading { display: none; }
+.device-chip {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 42px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+}
+.device-chip__icon { width: 22px; height: 22px; display: grid; place-items: center; color: var(--clr-text-secondary); }
+.device-chip__icon svg { width: 18px; height: 18px; }
+.device-chip__body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.device-chip__label { color: var(--clr-text); font-size: .72rem; font-weight: 700; white-space: nowrap; }
+.device-chip__state { display: inline-flex; align-items: center; gap: 5px; color: var(--clr-text-secondary); font-size: .65rem; }
+.device-chip__dot { width: 6px; height: 6px; }
+.device-chip__ago { color: var(--clr-text-secondary); font-size: .58rem; white-space: nowrap; }
+.device-chip--online .device-chip__icon, .device-chip--online .device-chip__state { color: var(--clr-low); }
+.device-chip--offline .device-chip__icon, .device-chip--offline .device-chip__state { color: var(--clr-high); }
+.device-chip--busy .device-chip__icon, .device-chip--busy .device-chip__state { color: var(--clr-primary-700); }
+.device-reset-btn { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; min-height: 38px; border-radius: 8px; border: 1px solid var(--clr-border); background: transparent; color: var(--clr-text-secondary); font-weight: 700; }
+.device-reset-btn:hover:not(:disabled) { background: var(--clr-primary-50); color: var(--clr-primary-700); border-color: var(--clr-primary-200); }
+.device-reset-btn:disabled { opacity: .5; }
+.device-reset-btn__icon-wrap { display: inline-flex; }
+.device-reset-btn__icon-wrap svg { width: 17px; height: 17px; }
+.device-reset-btn__icon { display: none; }
+@media (max-width: 1179px) {
+  .app-header__status { display: flex; align-items: center; flex-wrap: nowrap; gap: 4px; }
+  .device-chip { width: auto; flex: 1 1 180px; min-height: 42px; }
+  .device-reset-btn { width: auto; flex: 0 0 auto; padding-inline: 12px; }
+}
+@media (max-width: 560px) {
+  .device-chip { flex-basis: 145px; grid-template-columns: 20px minmax(0, 1fr); min-height: 40px; padding: 5px; }
+  .device-chip__icon { width: 20px; height: 20px; }
+  .device-chip__label { font-size: .68rem; }
+  .device-chip__ago { display: none; }
+  .device-reset-btn__full { display: none; }
+  .device-reset-btn { width: 42px; padding: 0; }
+  .device-reset-btn__icon-wrap { display: inline-flex; }
+}
+
+/* Offline age is useful diagnostic information and stays visible at every width. */
+.device-chip--offline .device-chip__ago { display: inline; color: var(--clr-high); font-size: .6rem; }
+
+/* Ultra-minimal utility treatment for the device rail. */
+.app-header__status { gap: 12px; }
+.device-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  padding: 2px 0;
+  background: transparent;
+}
+.device-chip__icon { display: none; }
+.device-chip__body { display: contents; }
+.device-chip__label { font-size: .7rem; font-weight: 600; color: var(--clr-text-secondary); }
+.device-chip__state { order: -1; font-size: 0; }
+.device-chip__dot { width: 7px; height: 7px; box-shadow: none; }
+.device-chip__ago { margin-left: auto; font-size: .58rem; }
+.device-reset-btn {
+  justify-content: flex-start;
+  width: auto;
+  min-height: 28px;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--clr-text-secondary);
+  font-size: .68rem;
+  font-weight: 600;
+}
+.device-reset-btn:hover:not(:disabled) { background: transparent; border: 0; color: var(--clr-primary-700); text-decoration: underline; }
+.device-reset-btn__icon-wrap { display: inline-flex; }
+.device-reset-btn__icon-wrap svg { width: 14px; height: 14px; }
+.device-reset-btn__full { display: inline; }
+@media (min-width: 1180px) {
+  .app-header__status { gap: 8px; }
+  .device-chip { min-height: 27px; }
+  .device-chip__ago { display: none; }
+  .device-reset-btn { margin-top: 4px; }
+}
+@media (max-width: 1179px) {
+  .app-header__status { gap: 10px; }
+  .device-chip { flex: 0 1 auto; min-width: 0; }
+  .device-chip__ago { display: none; }
+  .device-reset-btn { width: auto; padding-inline: 6px; }
+}
+@media (max-width: 560px) {
+  .device-chip { flex-basis: auto; min-height: 28px; padding: 2px 0; }
+  .device-chip__label { font-size: .64rem; }
+  .device-reset-btn { width: 30px; padding: 0; justify-content: center; }
+  .device-reset-btn__full { display: none; }
 }
 
 /* Bounded datasets: controls stay outside the scroller, camera stays mounted. */
@@ -182,3 +291,65 @@ textarea { resize: none; min-height: 100px; }
 }
 /* Page changes should reveal rows immediately rather than replay entrance fades. */
 .data-viewport .results-table tbody tr { animation: none; }
+.data-row-clickable { cursor: pointer; }
+.data-row-clickable:hover { background: var(--clr-primary-50) !important; }
+.data-row-clickable:focus-visible { outline: 3px solid var(--clr-primary-600); outline-offset: -3px; }
+
+/* Registry: separate the roster from the clinical record, with room for identity. */
+.pm-header__inner, .pm-main { width: min(1280px, calc(100% - 48px)); }
+.pm-main { padding-block: 28px 48px; }
+.pm-intro { align-items: center; gap: 24px; margin-bottom: 24px; }
+.pm-intro h1 { font-size: clamp(1.6rem, 2.6vw, 2rem); margin: 4px 0 8px; }
+.pm-workspace { grid-template-columns: 300px minmax(0, 1fr); gap: 24px; background: transparent; border: 0; overflow: visible; }
+.pm-roster { position: sticky; top: 92px; background: var(--clr-surface); border: var(--rule); border-radius: var(--r-panel); overflow: hidden; }
+.pm-roster__toolbar { position: static; padding: 18px; background: var(--clr-surface); }
+.pm-roster__title { font-size: .95rem; margin: 0 0 12px; }
+.pm-roster .data-search { padding-inline: 10px; max-width: none; }
+.pm-roster .data-search input { font-size: .78rem; }
+.pm-roster__count { margin-top: 10px; }
+.pm-roster__list { min-height: 0; max-height: 480px; overflow: auto; padding: 8px; }
+.pm-person { grid-template-columns: 40px minmax(0, 1fr) auto; padding: 12px 10px; border-bottom: 0; margin-bottom: 4px; border-radius: var(--r-field); }
+.pm-person:last-child { margin-bottom: 0; }
+.pm-person__body strong { white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
+.pm-person--active { box-shadow: inset 3px 0 var(--clr-primary-600); }
+.pm-detail { background: var(--clr-surface); padding: 24px; border: var(--rule); border-radius: var(--r-panel); }
+.pm-profile { padding: 20px; border: var(--rule); border-color: var(--clr-primary-100); border-radius: var(--r-field); gap: 16px; flex-wrap: wrap; }
+.pm-profile__identity { min-width: 0; flex: 1 1 240px; }
+.pm-profile__identity > div { min-width: 0; }
+.pm-profile h2 { overflow-wrap: anywhere; font-size: 1.45rem; margin: 4px 0; }
+.pm-profile .section-header__eyebrow { font-size: .73rem; letter-spacing: 0; }
+.pm-profile__actions { flex-wrap: wrap; }
+.pm-edit, .pm-delete { min-height: 40px; padding: 9px 12px; }
+.pm-conditions { padding-block: 24px; }
+.pm-section-heading { flex-wrap: wrap; gap: 6px 16px; }
+.pm-stats { border-radius: var(--r-field); overflow: hidden; margin-block: 20px 24px; background: var(--clr-surface); }
+.pm-stats > div { padding: 16px; }
+.pm-history__table-wrap { max-height: 380px; border-radius: var(--r-field); scrollbar-gutter: stable; }
+.pm-history__table th { position: sticky; top: 0; z-index: 1; background: var(--clr-primary-50); }
+.pm-history__table tbody tr:hover { background: var(--clr-primary-50); }
+@media (max-width: 1000px) {
+  .pm-workspace { grid-template-columns: 260px minmax(0, 1fr); gap: 16px; }
+  .pm-detail { padding: 18px; }
+  .pm-profile__actions { width: 100%; padding-left: 78px; }
+}
+@media (max-width: 760px) {
+  .pm-header__inner, .pm-main { width: calc(100% - 28px); }
+  .pm-workspace { grid-template-columns: 1fr; gap: 18px; }
+  .pm-roster { position: static; }
+  .pm-roster__list { max-height: 240px; }
+  .pm-intro { align-items: stretch; flex-direction: column; gap: 16px; }
+  .pm-intro .pm-add-button { align-self: flex-start; width: auto; }
+  .pm-detail { padding: 16px; }
+  .pm-profile { padding: 16px; }
+  .pm-profile__identity { flex-basis: 100%; }
+  .pm-profile__actions { padding-left: 0; }
+  .pm-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .pm-stats > div { border-bottom: 0; border-right: var(--rule); padding: 12px 10px; }
+  .pm-stats strong { font-size: 1.15rem; }
+}
+@media print {
+  .pm-roster { position: static; }
+  .pm-roster__list, .pm-history__table-wrap { max-height: none; overflow: visible; }
+}
+.pm-roster__list:focus-visible, .pm-history__table-wrap:focus-visible { outline: 2px solid var(--clr-primary-600); outline-offset: 2px; }
+.pm-history__table-wrap { scroll-padding-top: 42px; }

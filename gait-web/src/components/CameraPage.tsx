@@ -12,7 +12,7 @@ import "../camera.css";
 const IDLE: GaitPrediction = { status: "No Pose Detected", color: "#f59e0b", reasons: [] };
 const IDLE_FRAME: FrameData = { features: null, prediction: IDLE };
 
-// A camera's frame is "live" only if we received one recently — used to tell a
+// A camera's frame is "live" only if we received one recently - used to tell a
 // running side camera apart from one that's off / stalled.
 const FRESH_MS = 500;
 
@@ -49,7 +49,7 @@ export default function CameraPage({ activePatientId, activePatientName }: Props
   // stamp the walk with the NEXT round's number and pair it with the wrong result.
   const trialRef = useRef<{ sessionId: string; trialNo: number }>({ sessionId: "", trialNo: 0 });
   // true = รอบนี้เก้าอี้เป็นคนสั่งเริ่ม (เก้าอี้จึงมีสิทธิ์สั่งหยุด)
-  // false = เจ้าหน้าที่กดเอง — ห้ามให้เก้าอี้ไปหยุดกลางคัน
+  // false = เจ้าหน้าที่กดเอง - ห้ามให้เก้าอี้ไปหยุดกลางคัน
   const autoRef = useRef(false);
   const prevChairStateRef = useRef("");
   // sideLive อ่านจากใน callback ที่ไม่ได้ re-create ตาม state จึงต้องมี ref คู่ไว้
@@ -96,7 +96,7 @@ export default function CameraPage({ activePatientId, activePatientName }: Props
     const starting = !recorderRef.current.isRecording;
     recorderRef.current.toggle();
     recordingRef.current = recorderRef.current.isRecording;
-    autoRef.current = false; // taken over by hand — the chair must not stop it
+    autoRef.current = false; // taken over by hand - the chair must not stop it
     // จดเลขรอบเฉพาะตอน "เริ่ม" เท่านั้น ด้วยเหตุผลเดียวกับที่อธิบายไว้ที่ trialRef:
     // ระหว่างที่บันทึกอยู่ เก้าอี้อาจจบรอบและบวก trial_no ไปแล้ว การจดตอนกดหยุดจึง
     // แสตมป์ผลกล้องเป็นรอบถัดไป แล้วไปโผล่คู่กับผล TUG ของรอบหน้าแทน
@@ -116,12 +116,12 @@ export default function CameraPage({ activePatientId, activePatientName }: Props
     autoRef.current = false;
     setRecording(false);
 
-    // ไม่มีเฟรมที่ประเมินได้เลย = กล้องเปิดอยู่แต่ไม่เห็นคน (อยู่นอกเฟรม/มืดเกินไป)
+    // ไม่มีเฟรมที่ประเมินได้เลย = กล้องเปิดอยู่แต่ไม่เห็นคน (อยู่นอกภาพกล้อง/มืดเกินไป)
     // ห้ามอัปโหลด: recorder.result() จะคืน "No Data" ซึ่งจอสถานะอ่านเป็น "ปกติ"
-    // เพราะ normalizePredictionLabel ตีทุกป้ายที่ไม่รู้จักเป็น Normal — กลายเป็น
+    // เพราะ normalizePredictionLabel ตีทุกป้ายที่ไม่รู้จักเป็น Normal - กลายเป็น
     // รายงานว่าเดินปกติทั้งที่ไม่เคยวัดอะไรได้เลย
     if (recorderRef.current.totalFrames === 0) {
-      setAutoNote("รอบนี้กล้องจับท่าเดินไม่ได้ (ผู้ทดสอบอาจอยู่นอกเฟรม) — ไม่ได้ส่งผลขึ้นระบบ");
+      setAutoNote("รอบนี้กล้องจับท่าเดินไม่ได้ (ผู้ทดสอบอาจอยู่นอกภาพกล้อง) - ไม่ได้ส่งผลขึ้นระบบ");
       return;
     }
 
@@ -147,13 +147,15 @@ export default function CameraPage({ activePatientId, activePatientName }: Props
     });
     setUploading(false);
     uploadingRef.current = false;
-    // ส่งสำเร็จแล้วล็อกปุ่มไว้ — กดซ้ำจะได้ doc ที่สอง session_id/trial_no เดียวกัน
+    // ส่งสำเร็จแล้วล็อกปุ่มไว้ - กดซ้ำจะได้ doc ที่สอง session_id/trial_no เดียวกัน
     // แล้วจอสถานะ (assessmentForTrial ใช้ find) จะหยิบตัวไหนก็ได้
     setUploaded(!!outcome.documentId);
+    // รายละเอียด error เป็นภาษาเทคนิค (อังกฤษ) - เก็บไว้ใน console ให้ผู้พัฒนา หน้าจอบอกแค่สิ่งที่ต้องทำ
+    if (!outcome.documentId) console.warn("[uploadAssessment]", outcome.status);
     setAutoNote(
       outcome.documentId
-        ? `ส่งผลรอบที่ ${trialRef.current.trialNo || "?"} ขึ้นระบบแล้ว — ดูสรุปได้ที่จอสถานะ`
-        : `ส่งผลไม่สำเร็จ: ${outcome.status}`,
+        ? `ส่งผลรอบที่ ${trialRef.current.trialNo || "?"} เข้าระบบแล้ว - ดูสรุปได้ที่จอสถานะ`
+        : "ส่งผลไม่สำเร็จ ลองกด “จบและส่งผล” อีกครั้ง",
     );
   }, [activePatientId]);
 
@@ -190,7 +192,7 @@ export default function CameraPage({ activePatientId, activePatientName }: Props
       const frontLive = now - frontRef.current.tMs < FRESH_MS;
       const sideNow = now - sideRef.current.tMs < FRESH_MS;
       if (!frontLive && !sideNow) {
-        setAutoNote("ผู้ทดสอบเริ่มเดินแล้ว แต่ยังไม่ได้เปิดกล้อง — รอบนี้จะไม่มีผลวิเคราะห์ท่าเดิน");
+        setAutoNote("ผู้ทดสอบเริ่มเดินแล้ว แต่ยังไม่ได้เปิดกล้อง - รอบนี้จะไม่มีผลวิเคราะห์ท่าเดิน");
         return;
       }
       trialRef.current = { sessionId: chair.sessionId, trialNo: chair.trialNo };
@@ -202,13 +204,13 @@ export default function CameraPage({ activePatientId, activePatientName }: Props
       setStepCount(0);
       setSummary(null);
       setUploaded(false);
-      setAutoNote(`เริ่มบันทึกอัตโนมัติ — รอบที่ ${chair.trialNo || "?"}`);
+      setAutoNote(`เริ่มบันทึกอัตโนมัติ - รอบที่ ${chair.trialNo || "?"}`);
       return;
     }
 
     // จบรอบ = ออกจากช่วงทดสอบ (นั่งลง → COOLDOWN หรือถูกยกเลิก/หมดเวลา)
     if (autoRef.current && inTest(prev) && !inTest(state)) {
-      setAutoNote("จบรอบ — กำลังอัปโหลดผลวิเคราะห์ท่าเดิน");
+      setAutoNote("จบรอบ - กำลังส่งผลวิเคราะห์ท่าเดิน");
       void finishRef.current();
     }
   }, [chair.state, chair.online, chair.sessionId, chair.trialNo]);
@@ -218,8 +220,8 @@ export default function CameraPage({ activePatientId, activePatientName }: Props
   return (
     <div className="gc-page2">
       <div className="gc-cams">
-        <CameraView view="front" label="กล้องด้านหน้า (Front)" onFrame={handleFront} />
-        <CameraView view="side" label="กล้องด้านข้าง (Side)" onFrame={handleSide} />
+        <CameraView view="front" label="กล้องด้านหน้า" onFrame={handleFront} />
+        <CameraView view="side" label="กล้องด้านข้าง" onFrame={handleSide} />
       </div>
 
       <div className="gc-side">
@@ -230,8 +232,8 @@ export default function CameraPage({ activePatientId, activePatientName }: Props
 
           <div className={`gc-auto gc-auto--${chair.online ? "on" : "off"}`}>
             {chair.online
-              ? "เชื่อมกับเก้าอี้แล้ว — เปิดกล้องค้างไว้ ระบบจะเริ่มบันทึกเองเมื่อผู้ทดสอบลุก"
-              : "ยังไม่พบเก้าอี้ — ใช้ปุ่มด้านล่างบันทึกเองได้ตามปกติ"}
+              ? "เชื่อมกับเก้าอี้แล้ว - เปิดกล้องค้างไว้ ระบบจะเริ่มบันทึกเองเมื่อผู้ทดสอบลุก"
+              : "ยังไม่พบเก้าอี้ - ใช้ปุ่มด้านล่างบันทึกเองได้ตามปกติ"}
           </div>
           {autoNote && <div className="gc-auto__note">{autoNote}</div>}
 
@@ -239,11 +241,11 @@ export default function CameraPage({ activePatientId, activePatientName }: Props
             {recording ? `■ หยุดบันทึก (${frameCount})` : "● เริ่มบันทึก"}
           </button>
           <button className="gc-btn" onClick={() => void finishAndUpload()} disabled={!canUpload || uploading}>
-            {uploading ? "กำลังอัปโหลด…" : uploaded ? "ส่งผลรอบนี้แล้ว" : "จบ & อัปโหลดผล"}
+            {uploading ? "กำลังส่งผล…" : uploaded ? "ส่งผลรอบนี้แล้ว" : "จบและส่งผล"}
           </button>
           {recording && (
             <span className="gc-rec">
-              <span className="gc-rec__dot" />REC · {frameCount} เฟรม · {stepCount} ก้าว
+              <span className="gc-rec__dot" />กำลังบันทึก · {frameCount} ภาพ · {stepCount} ก้าว
             </span>
           )}
         </div>
@@ -282,7 +284,7 @@ function FusionPanel({ front, side, sideLive }: { front: GaitPrediction; side: G
     <div className="gc-fusion">
       <div className="gc-fusion__cams">
         <span>หน้า: <b>{th(fLabel)}</b></span>
-        <span>ข้าง: <b>{sideLive ? th(sLabel) : "—"}</b></span>
+        <span>ข้าง: <b>{sideLive ? th(sLabel) : "-"}</b></span>
       </div>
       <div className={`gc-fusion__verdict gc-fusion__verdict--${verdict.cls}`}>{verdict.text}</div>
     </div>

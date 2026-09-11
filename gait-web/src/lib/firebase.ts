@@ -19,6 +19,7 @@ import {
   type DocumentData,
 } from "firebase/firestore";
 import type { GaitSessionRecorder } from "./recorder";
+import type { ChairDistances, CheckpointDistances } from "./deviceConfig";
 
 const firebaseConfig = {
   apiKey: "AIzaSyC4dFT0u_NWRmsbuQygQhQnW6nGuRUn4D8",
@@ -262,13 +263,26 @@ export interface DeviceStatus {
   light: string; // สีไฟที่หลอดกำลังแสดงจริง: not_ready|ready|stand_up|walking|passed|result_*
   chairState: string; // สถานะเก้าอี้ที่ checkpoint ได้ยินทาง ESP-NOW — เร็วกว่า device_status/chair
   //                     ตลอดช่วง RETURNING เพราะช่วงนั้นเก้าอี้หยุดคุย Firestore ไม่ให้จับเวลาเพี้ยน
+  // ค่าระยะที่บอร์ด "ใช้อยู่จริง" (0 = เฟิร์มแวร์รุ่นเก่า ยังไม่รายงาน)
+  cfgSitCm: number; // chair
+  cfgStandCm: number; // chair
+  cfgDetectCm: number; // checkpoint
+  /** ระยะที่อ่านได้ถูกต้องครั้งล่าสุด · -1 = ยังไม่เคยได้ echo ตั้งแต่บูต · null = บอร์ดไม่รายงาน */
+  distanceCm: number | null;
+  /** false = ช่วงนี้ไม่ได้รับเสียงสะท้อน (distanceCm เป็นค่าเก่า) · เฟิร์มแวร์เก่าไม่ส่งมา → ถือว่า true */
+  distanceLive: boolean;
+  /** chair: epoch วินาทีที่เข้าสถานะปัจจุบัน — ใช้นับถอยหลังช่วงพัก (0 = ไม่รู้) */
+  stateSince: number;
+  /** chair: ความยาวช่วงพักหลังจบรอบ (วินาที) · 0 = ไม่รายงาน */
+  cooldownSec: number;
 }
 
-const EMPTY_DEVICE: DeviceStatus = {
+export const EMPTY_DEVICE: DeviceStatus = {
   exists: false, lastSeen: 0, state: "", rssi: 0, fwVersion: "", uptimeSec: 0,
   checkpointOnline: false, pendingUploads: 0, armed: false,
   subjectKey: "", sessionId: "", trialNo: 0, chairOnline: false,
   light: "", chairState: "",
+  cfgSitCm: 0, cfgStandCm: 0, cfgDetectCm: 0, distanceCm: null, distanceLive: false, stateSince: 0, cooldownSec: 0,
 };
 
 export function subscribeDeviceStatus(
@@ -300,6 +314,13 @@ export function subscribeDeviceStatus(
         chairOnline: d.chair_online === true,
         light: d.light ?? "",
         chairState: d.chair_state ?? "",
+        cfgSitCm: num(d.cfg_sit_cm),
+        cfgStandCm: num(d.cfg_stand_cm),
+        cfgDetectCm: num(d.cfg_detect_cm),
+        distanceCm: numOrNull(d.distance_cm),
+        distanceLive: d.distance_live !== false,
+        stateSince: num(d.state_since),
+        cooldownSec: num(d.cooldown_sec),
       });
     },
     (err) => onError?.(err),
@@ -334,6 +355,56 @@ export async function requestReset(): Promise<void> {
   await ensureAuth();
   const nowSec = Math.floor(Date.now() / 1000);
   await setDoc(doc(db, "device_commands", "chair"), { reset_requested_at: nowSec }, { merge: true });
+}
+
+// ── Sensor distance settings ──
+// เว็บเขียน "ค่าที่ขอให้ใช้" ลง device_commands/<บอร์ด> ซึ่งบอร์ด poll อยู่แล้ว (เก้าอี้ทุก 4 วิ,
+// จุดหมุนตัวทุก 6 วิ) จึงไม่เพิ่มการอ่าน Firestore — บอร์ดตรวจช่วงค่า จำลง flash แล้วรายงาน
+// "ค่าที่ใช้อยู่จริง" กลับใน device_status/<บอร์ด> (cfg_*) หน้าเว็บเทียบสองค่าเพื่อบอกว่ารับแล้วหรือยัง
+// บอร์ดจะไม่เปลี่ยนเกณฑ์ระหว่างรอบทดสอบ — ค่าที่ขอค้างอยู่ในเอกสาร และถูกหยิบไปใช้หลังจบรอบเอง
+export interface DeviceConfigRequest {
+  sitCm: number | null;
+  standCm: number | null;
+  detectCm: number | null;
+  setAt: number; // epoch วินาทีที่บันทึกล่าสุด
+}
+
+export function subscribeDeviceConfig(
+  deviceId: DeviceId,
+  cb: (c: DeviceConfigRequest) => void,
+  onError?: (e: Error) => void,
+) {
+  return onSnapshot(
+    doc(db, "device_commands", deviceId),
+    (snap) => {
+      const d = (snap.data() as DocumentData) ?? {};
+      cb({
+        sitCm: numOrNull(d.cfg_sit_cm),
+        standCm: numOrNull(d.cfg_stand_cm),
+        detectCm: numOrNull(d.cfg_detect_cm),
+        setAt: num(d.cfg_set_at),
+      });
+    },
+    (err) => onError?.(err),
+  );
+}
+
+export async function saveChairDistances(v: ChairDistances): Promise<void> {
+  await ensureAuth();
+  await setDoc(
+    doc(db, "device_commands", "chair"),
+    { cfg_sit_cm: v.sitCm, cfg_stand_cm: v.standCm, cfg_set_at: Math.floor(Date.now() / 1000) },
+    { merge: true },
+  );
+}
+
+export async function saveCheckpointDistances(v: CheckpointDistances): Promise<void> {
+  await ensureAuth();
+  await setDoc(
+    doc(db, "device_commands", "checkpoint"),
+    { cfg_detect_cm: v.detectCm, cfg_set_at: Math.floor(Date.now() / 1000) },
+    { merge: true },
+  );
 }
 
 // ── Who is being tested right now ──

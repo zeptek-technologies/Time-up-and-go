@@ -36,3 +36,10 @@ GitHub branch codex/web-backup-2026-09-11, commit cb5eba3, stores the current we
 - Local search filters text only; no submit, remote request, or mutation is fired during IME composition. Patient selection remains independent of the displayed page and the full selector remains available.
 - Scrolling resets inside the list after changing pages/filters/size; keyboard focus stays at the control. Pagination is outside the scrolling list. Printing expands the current page only; its range remains visible.
 - Verification: gait-web/tests/pagination.mjs covers 100 patients, 100 results, 120 assessments and boundary conditions with synthetic data only. Browser checks use read-only interactions with existing data.
+
+## Device settings contract (2026-09-11)
+- Canonical owners: components/DeviceSettingsSection.tsx (UI), lib/deviceConfig.ts (defaults, limits, validation), lib/firebase.ts saveChairDistances/saveCheckpointDistances/subscribeDeviceConfig, hooks/useDeviceConfig.ts. Firmware limits (CFG_* in both .ino files) must match lib/deviceConfig.ts.
+- Data flow: the web writes requested values (cfg_sit_cm, cfg_stand_cm / cfg_detect_cm, cfg_set_at) into the existing device_commands/<board> documents that boards already poll; no new collection, rules or reads. Boards validate, persist to NVS and report applied values plus latest distance_cm in device_status/<board>. The UI compares saved vs applied values to show pending/applied/offline/old-firmware states.
+- Boards never switch thresholds mid-trial; a saved value is applied on the first poll after the trial ends. Invalid values are rejected by both the form and the firmware.
+- Form fields follow Firestore until the user edits (draft); cancel restores the live value. Saving is the only mutation; there is no confirmation dialog because the change is reversible and confined to sensor thresholds.
+- Cooldown countdown: hooks/useCooldownCountdown.ts derives the remaining time from chair state_since + cooldown_sec, falling back to first-seen time + 15 s for older firmware, clamped to the cooldown length.

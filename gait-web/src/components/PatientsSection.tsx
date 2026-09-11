@@ -1,3 +1,4 @@
+import PatientAvatar from "./PatientAvatar";
 import DataViewport from "./DataViewport";
 import { useState } from "react";
 import Pagination from "./Pagination";
@@ -50,7 +51,7 @@ export default function PatientsSection({ data, activePatientId, setActivePatien
           {filtered.length === 0 ? (
             <div style={{ gridColumn: "1/-1", textAlign: "center", padding: 40, color: "var(--clr-text-secondary)" }}>
               <IconPatients width={44} height={44} style={{ color: "#94a3b8", marginBottom: 8 }} />
-              <p style={{ fontSize: ".85rem" }}>{query ? "ไม่พบผู้ทดสอบที่ตรงกับคำค้น" : 'ยังไม่มีข้อมูลผู้ทดสอบ — กดปุ่ม "เพิ่มผู้ทดสอบ" เพื่อเริ่มต้น'}</p>
+              <p style={{ fontSize: ".85rem" }}>{query ? "ไม่พบผู้ทดสอบที่ตรงกับคำค้น" : 'ยังไม่มีข้อมูลผู้ทดสอบ - กดปุ่ม "เพิ่มผู้ทดสอบ" เพื่อเริ่มต้น'}</p>
             </div>
           ) : (
             pagination.items.map((p) => {
@@ -62,7 +63,7 @@ export default function PatientsSection({ data, activePatientId, setActivePatien
               return (
                 <div key={p.id} className={`patient-card ${p.id === activePatientId ? "patient-card--active" : ""}`}>
                   <div className="patient-card__top">
-                    <div className="patient-card__avatar">{p.name.charAt(0)}</div>
+                    <PatientAvatar gender={p.gender} />
                     <div className="patient-card__info">
                       <div className="patient-card__name">{p.name}</div>
                       <div className="patient-card__meta">{meta.join(" · ")}</div>
@@ -103,7 +104,7 @@ function ActivePatientBar({
         <span className="active-patient-bar__label">ผู้ทดสอบที่เลือก:</span>
       </div>
       <select className="active-patient-select" value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">— ไม่ระบุผู้ทดสอบ —</option>
+        <option value="">- ไม่ระบุผู้ทดสอบ -</option>
         {patients.map((p) => (
           <option key={p.id} value={p.id}>{p.name}</option>
         ))}

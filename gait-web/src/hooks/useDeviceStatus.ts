@@ -3,7 +3,7 @@
 // timer re-evaluates freshness so it flips to offline even when NO new snapshot
 // arrives (i.e. exactly when the device has gone away).
 import { useEffect, useState } from "react";
-import { ensureAuth, subscribeDeviceStatus, type DeviceId, type DeviceStatus } from "../lib/firebase";
+import { EMPTY_DEVICE, ensureAuth, subscribeDeviceStatus, type DeviceId, type DeviceStatus } from "../lib/firebase";
 
 // 3x the 15s heartbeat: tolerates one or two dropped beats on flaky WiFi so
 // staff don't see a scary OFFLINE for a board that's actually fine.
@@ -57,12 +57,7 @@ export function useDeviceStatus(deviceId: DeviceId): DeviceView {
   const online = known && secondsAgo > -CLOCK_SKEW_TOLERANCE_SEC && secondsAgo < STALE_SEC;
 
   return {
-    ...(raw ?? {
-      exists: false, lastSeen: 0, state: "", rssi: 0, fwVersion: "", uptimeSec: 0,
-      checkpointOnline: false, pendingUploads: 0, armed: false,
-      subjectKey: "", sessionId: "", trialNo: 0, chairOnline: false,
-      light: "", chairState: "",
-    }),
+    ...(raw ?? EMPTY_DEVICE),
     online,
     known,
     secondsAgo,

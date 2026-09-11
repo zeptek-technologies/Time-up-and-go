@@ -116,6 +116,11 @@
    เมนูมาแย่งที่ด้วย แต่หน้านี้มีแค่โลโก้กับการ์ดสถานะ พื้นที่เหลือเฟือ —
    และเป็นจอที่เจ้าหน้าที่มองจากไกล ยิ่งต้องรู้ว่าข้อมูลเก่าแค่ไหน จึงคืนค่าให้แสดง */
 .live-links .device-chip__ago { display: inline; }
+/* redesign.css ให้ป้ายกว้าง 100% (สำหรับแถบเมนูหน้าหลัก) — ในแถวนี้ป้ายสองอันจึงถูกบีบจนกล่องชื่อบอร์ด
+   แคบกว่าตัวอักษร แล้วชื่อ "จุดหมุนตัว" ล้นไปทับเวลา "…ที่แล้ว" หน้านี้มีที่ว่างเหลือเฟือ
+   จึงให้ป้ายกว้างตามข้อความจริง และห้ามชื่อบอร์ดหด */
+.live-links .device-chip { width: auto; flex: 0 0 auto; }
+.live-links .device-chip__label { flex-shrink: 0; }
 
 .live-stage {
   max-width: 1380px;
@@ -260,6 +265,17 @@
   border-color: #10b981;
   background: #10b981;
 }
+
+/* นับถอยหลังช่วงพักหลังจบรอบ — ข้อความเล็กชิดขวาใต้ขั้น "เสร็จสิ้น" ไม่แย่งความสนใจจากผล */
+.live-countdown {
+  max-width: 1380px;
+  margin: 10px auto 0;
+  color: var(--clr-text-secondary);
+  font-size: 0.82rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.live-countdown strong { color: var(--live-accent); font-weight: 800; }
 
 .live-result {
   max-width: 1380px;

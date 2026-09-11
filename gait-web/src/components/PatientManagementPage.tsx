@@ -1,3 +1,6 @@
+import PatientAvatar from "./PatientAvatar";
+import DataSearch from "./DataSearch";
+import PatientTrendChart from "./PatientTrendChart";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTugData, type TugData } from "../hooks/useTugData";
 import { CONDITION_LABEL, CONDITION_OPTIONS } from "../lib/conditions";
@@ -66,25 +69,14 @@ export default function PatientManagementPage() {
         <div className="pm-workspace">
           <aside className="pm-roster" aria-label="รายชื่อผู้ทดสอบ">
             <div className="pm-roster__toolbar">
-              <label className="pm-search">
-                <span className="sr-only">ค้นหาผู้ทดสอบ</span>
-                <svg aria-hidden="true" viewBox="0 0 24 24">
-                  <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
-                  <path d="M16 16l4 4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                </svg>
-                <input
-                  type="search"
-                  placeholder="ค้นหาชื่อ อายุ หรือโรคประจำตัว"
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                />
-              </label>
+              <h2 className="pm-roster__title">รายชื่อผู้ทดสอบ</h2>
+              <DataSearch label="ค้นหาผู้ทดสอบ" placeholder="ค้นหาชื่อ อายุ หรือโรคประจำตัว" value={search} onChange={setSearch} />
               <div className="pm-roster__count">
                 พบ {filteredPatients.length} จาก {data.patients.length} คน
               </div>
             </div>
 
-            <div className="pm-roster__list">
+            <div className="pm-roster__list" tabIndex={0} role="region" aria-label="เลื่อนรายชื่อผู้ทดสอบ">
               {data.conn === "pending" ? (
                 <div className="pm-empty">กำลังโหลดรายชื่อ…</div>
               ) : filteredPatients.length === 0 ? (
@@ -104,7 +96,7 @@ export default function PatientManagementPage() {
                       onClick={() => setSelectedId(patient.id)}
                       aria-pressed={patient.id === effectiveSelectedId}
                     >
-                      <span className="pm-person__avatar" aria-hidden="true">{patient.name.charAt(0) || "?"}</span>
+                      <PatientAvatar gender={patient.gender} />
                       <span className="pm-person__body">
                         <strong>{patient.name}</strong>
                         <span>{patient.age ? `${patient.age} ปี` : "ไม่ระบุอายุ"} · ผลทดสอบ {resultCount} ครั้ง</span>
@@ -168,9 +160,9 @@ function PatientDetail({
     <>
       <div className="pm-profile">
         <div className="pm-profile__identity">
-          <span className="pm-profile__avatar" aria-hidden="true">{patient.name.charAt(0) || "?"}</span>
+          <PatientAvatar gender={patient.gender} size="large" />
           <div>
-            <span className="section-header__eyebrow">Selected Patient</span>
+            <span className="section-header__eyebrow">ผู้ทดสอบที่เลือก</span>
             <h2>{patient.name}</h2>
             <p>
               {[patient.age ? `${patient.age} ปี` : "", patient.gender].filter(Boolean).join(" · ") || "ไม่ระบุอายุและเพศ"}
@@ -204,20 +196,22 @@ function PatientDetail({
 
       <div className="pm-stats" aria-label="สรุปผล TUG">
         <div><span>ทดสอบสำเร็จ</span><strong>{completed.length}</strong><small>ครั้ง</small></div>
-        <div><span>เวลาเฉลี่ย</span><strong>{average === null ? "—" : average.toFixed(2)}</strong><small>{average === null ? "" : "วินาที"}</small></div>
+        <div><span>เวลาเฉลี่ย</span><strong>{average === null ? "-" : average.toFixed(2)}</strong><small>{average === null ? "" : "วินาที"}</small></div>
         <div className={latest ? `pm-stat--${riskClass(riskLevelOf(latest.totalSec))}` : ""}>
           <span>ผลล่าสุด</span>
-          <strong>{latest ? riskThai(riskLevelOf(latest.totalSec)) : "—"}</strong>
+          <strong>{latest ? riskThai(riskLevelOf(latest.totalSec)) : "-"}</strong>
           <small>{latest ? `${latest.totalSec.toFixed(2)} วินาที` : "ยังไม่มีผล"}</small>
         </div>
       </div>
+
+      <PatientTrendChart results={results} />
 
       <div className="pm-history">
         <div className="pm-section-heading">
           <h3>ประวัติ TUG</h3>
           <span>{results.length} รายการ</span>
         </div>
-        <div className="pm-history__table-wrap">
+        <div className="pm-history__table-wrap" tabIndex={0} role="region" aria-label="เลื่อนประวัติ TUG">
           <table className="pm-history__table">
             <thead>
               <tr><th>วันและเวลา</th><th>รอบ</th><th>ไป</th><th>กลับ</th><th>รวม</th><th>ผล</th></tr>
@@ -230,9 +224,9 @@ function PatientDetail({
                 return (
                   <tr key={result.id}>
                     <td data-label="วันและเวลา">{formatThai(result.finishedAt)}</td>
-                    <td data-label="รอบ">{result.trialNo || "—"}</td>
+                    <td data-label="รอบ">{result.trialNo || "-"}</td>
                     <td data-label="ไป">{result.checkpointSec.toFixed(2)}</td>
-                    <td data-label="กลับ">{result.returnSec > 0 ? result.returnSec.toFixed(2) : "—"}</td>
+                    <td data-label="กลับ">{result.returnSec > 0 ? result.returnSec.toFixed(2) : "-"}</td>
                     <td data-label="รวม"><strong>{result.totalSec.toFixed(2)} วินาที</strong></td>
                     <td data-label="ผล">
                       {result.status === "aborted"
@@ -252,7 +246,7 @@ function PatientDetail({
           <h3>ประวัติการประเมินการเดินจากกล้อง</h3>
           <span>{assessments.length} รายการ</span>
         </div>
-        <div className="pm-history__table-wrap">
+        <div className="pm-history__table-wrap" tabIndex={0} role="region" aria-label="เลื่อนประวัติจากกล้อง">
           <table className="pm-history__table">
             <thead>
               <tr><th>วันและเวลา</th><th>ผลที่ตรวจพบ</th><th>ความมั่นใจ</th><th>จำนวนก้าว</th><th>จังหวะก้าว</th></tr>
@@ -265,8 +259,8 @@ function PatientDetail({
                   <td data-label="วันและเวลา">{formatIsoThai(assessment.timestampRaw)}</td>
                   <td data-label="ผลที่ตรวจพบ">{getDiseaseMeta(assessment.condition).th}</td>
                   <td data-label="ความมั่นใจ">{assessment.confidence.toFixed(1)}%</td>
-                  <td data-label="จำนวนก้าว">{assessment.stepCount ?? "—"}</td>
-                  <td data-label="จังหวะก้าว">{assessment.cadenceAvg === null ? "—" : `${assessment.cadenceAvg.toFixed(1)} ก้าว/นาที`}</td>
+                  <td data-label="จำนวนก้าว">{assessment.stepCount ?? "-"}</td>
+                  <td data-label="จังหวะก้าว">{assessment.cadenceAvg === null ? "-" : `${assessment.cadenceAvg.toFixed(1)} ก้าว/นาที`}</td>
                 </tr>
               ))}
             </tbody>
@@ -278,7 +272,7 @@ function PatientDetail({
 }
 
 // ฟอร์มเดียวใช้ทั้งเพิ่มและแก้ไข: ช่องที่กรอกเหมือนกันเป๊ะ และการมีฟอร์มแก้ไขคือ
-// ทางเดียวที่จะใส่โรคประจำตัวให้คนที่อยู่ในทะเบียนอยู่แล้วได้ — เดิมทำได้แค่ตอนสร้าง
+// ทางเดียวที่จะใส่โรคประจำตัวให้คนที่อยู่ในทะเบียนอยู่แล้วได้ - เดิมทำได้แค่ตอนสร้าง
 // ใหม่ ซึ่งแปลว่าต้องลบทิ้งแล้วสร้างใหม่ และประวัติผลเดิมจะขาดจากรายชื่อไปด้วย
 function PatientDialog({
   data,
@@ -365,7 +359,7 @@ function PatientDialog({
         <form onSubmit={submit}>
           <div className="pm-form__identity">
             <label className="pm-field pm-field--wide">
-              <span>ชื่อ–นามสกุล <em>*</em></span>
+              <span>ชื่อ-นามสกุล <em>*</em></span>
               <input required value={name} onChange={(event) => setName(event.target.value)} placeholder="เช่น สมชาย ใจดี" />
             </label>
             <label className="pm-field">
@@ -375,7 +369,7 @@ function PatientDialog({
             <label className="pm-field">
               <span>เพศ</span>
               <select value={gender} onChange={(event) => setGender(event.target.value)}>
-                <option value="">— ไม่ระบุ —</option>
+                <option value="">- ไม่ระบุ -</option>
                 <option value="ชาย">ชาย</option>
                 <option value="หญิง">หญิง</option>
                 <option value="อื่นๆ">อื่นๆ</option>

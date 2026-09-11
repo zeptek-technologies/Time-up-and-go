@@ -13,7 +13,7 @@ export default function Header({ active, onNavigate }: Props) {
   return (
     <header className="app-header">
       <div className="app-header__inner">
-        <button className="app-brand" aria-label="TUG Care Board — กลับภาพรวม" type="button" onClick={() => onNavigate("overview")}>
+        <button className="app-brand" aria-label="TUG Care Board - กลับภาพรวม" type="button" onClick={() => onNavigate("overview")}>
           <span className="app-brand__icon" aria-hidden="true">
             <svg viewBox="0 0 64 64">
               <circle cx="32" cy="32" r="30" fill="currentColor" opacity="0.15" />
@@ -53,12 +53,16 @@ export default function Header({ active, onNavigate }: Props) {
             rel="noopener noreferrer"
             title="เปิดจอแสดงสถานะในแท็บใหม่"
           >
-            จอสถานะ ESP32 <span aria-hidden="true">↗</span>
+            จอสถานะการทดสอบ <span aria-hidden="true">↗</span>
             <span className="sr-only"> เปิดในแท็บใหม่</span>
           </a>
         </nav>
 
         <div className="app-header__status">
+          <div className="app-header__status-heading">
+            <span>สถานะอุปกรณ์</span>
+            <small>ความพร้อมของระบบ</small>
+          </div>
           <DeviceStatusChip deviceId="chair" />
           <DeviceStatusChip deviceId="checkpoint" />
           <DeviceResetButton />
@@ -75,4 +79,5 @@ const NAV_ICONS: Record<SectionKey, string> = {
   records: "M6 3h12v18H6z M9 8h6 M9 12h6 M9 16h4",
   disease: "M3 12h4l3-8 4 16 3-8h4",
   guide: "M4 4h7l1 2 1-2h7v16h-7l-1 1-1-1H4z M12 6v15",
+  devices: "M4 21v-7 M4 10V3 M12 21v-9 M12 8V3 M20 21v-5 M20 12V3 M1 14h6 M9 8h6 M17 16h6",
 };

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import DeviceStatusChip from "./DeviceStatusChip";
 import { useDeviceStatus } from "../hooks/useDeviceStatus";
+import { useCooldownCountdown } from "../hooks/useCooldownCountdown";
 import {
   ensureAuth,
   subscribeActiveSubject,
@@ -41,8 +42,8 @@ type Stage = {
 
 const FLOW = [
   { label: "พร้อม", short: "เตรียมลุก" },
-  { label: "กำลังเดิน", short: "ไป Checkpoint" },
-  { label: "ผ่าน Checkpoint", short: "เดินกลับ" },
+  { label: "กำลังเดิน", short: "ไปจุดหมุนตัว" },
+  { label: "ผ่านจุดหมุนตัว", short: "เดินกลับ" },
   { label: "เสร็จสิ้น", short: "ดูผล" },
 ];
 
@@ -60,7 +61,7 @@ function stageFrom(state: string, known: boolean, online: boolean): Stage {
       eyebrow: "กำลังเชื่อมต่อ",
       title: "กำลังค้นหาอุปกรณ์",
       instruction: "กรุณารอสักครู่",
-      detail: "หน้าเว็บกำลังเชื่อมต่อ Firebase และรอข้อมูลจาก ESP32",
+      detail: "หน้าเว็บกำลังเชื่อมต่อระบบ และรอข้อมูลจากอุปกรณ์",
     };
   }
 
@@ -69,8 +70,8 @@ function stageFrom(state: string, known: boolean, online: boolean): Stage {
       key: "offline",
       step: -1,
       eyebrow: "การเชื่อมต่อขาดหาย",
-      title: "ESP32 ออฟไลน์",
-      instruction: "ตรวจไฟเลี้ยงและการเชื่อมต่อ Wi-Fi",
+      title: "อุปกรณ์ออฟไลน์",
+      instruction: "ตรวจว่าอุปกรณ์เสียบไฟอยู่ และต่อ Wi-Fi ได้",
       detail: "เมื่ออุปกรณ์กลับมาออนไลน์ หน้านี้จะอัปเดตให้อัตโนมัติ",
     };
   }
@@ -101,7 +102,7 @@ function stageFrom(state: string, known: boolean, online: boolean): Stage {
         eyebrow: "พร้อมเริ่มทดสอบ",
         title: "พร้อม",
         instruction: "พร้อมแล้ว ให้ลุกเดินได้เลย",
-        detail: "ลุกจากเก้าอี้และเดินตรงไปยังจุด Checkpoint",
+        detail: "ลุกจากเก้าอี้และเดินตรงไปยังจุดหมุนตัว",
       };
     case "RUNNING":
       return {
@@ -109,15 +110,15 @@ function stageFrom(state: string, known: boolean, online: boolean): Stage {
         step: 1,
         eyebrow: "กำลังจับเวลา",
         title: "กำลังเดิน",
-        instruction: "เดินตรงไปยังจุด Checkpoint",
+        instruction: "เดินตรงไปยังจุดหมุนตัว",
         detail: "เดินด้วยความเร็วตามปกติ ไม่ต้องรีบ",
       };
     case "RETURNING":
       return {
         key: "checkpoint",
         step: 2,
-        eyebrow: "ผ่านจุด Checkpoint แล้ว",
-        title: "ผ่านจุด Checkpoint แล้ว",
+        eyebrow: "ผ่านจุดหมุนตัวแล้ว",
+        title: "ผ่านจุดหมุนตัวแล้ว",
         instruction: "เดินกลับไปที่เก้าอี้",
         detail: "เดินกลับด้วยความเร็วตามปกติ แล้วนั่งลงให้เรียบร้อย",
       };
@@ -137,7 +138,7 @@ function stageFrom(state: string, known: boolean, online: boolean): Stage {
         eyebrow: "อุปกรณ์ออนไลน์",
         title: "รอเริ่มการทดสอบ",
         instruction: "กรุณาเตรียมผู้ทดสอบ",
-        detail: "หน้านี้จะเปลี่ยนสถานะอัตโนมัติเมื่อ ESP32 เริ่มทำงาน",
+        detail: "หน้านี้จะเปลี่ยนสถานะเองเมื่ออุปกรณ์เริ่มทำงาน",
       };
   }
 }
@@ -211,6 +212,9 @@ export default function LiveStatusPage() {
     [cameraLabel, cameraFlagged, conditions],
   );
 
+  // ช่วงพักหลังจบรอบ (COOLDOWN) - บอกเจ้าหน้าที่ว่าอีกกี่วินาทีบอร์ดจะพร้อมรับรอบถัดไป
+  const nextRoundIn = useCooldownCountdown(stage.key === "complete", chair.stateSince, chair.cooldownSec);
+
   return (
     <main className={`live-page live-page--${stage.key}`}>
       <header className="live-header">
@@ -228,7 +232,7 @@ export default function LiveStatusPage() {
         </a>
 
         {/* ใช้การ์ดตัวเดียวกับหน้าหลัก เพื่อให้ชื่อบอร์ด สถานะ และเวลาที่อัปเดตล่าสุด
-            ตรงกันทั้งสองหน้า — รวมถึงสถานะ "กำลังทดสอบ" ของจุดหมุนตัว ที่หน้านี้เคย
+            ตรงกันทั้งสองหน้า - รวมถึงสถานะ "กำลังทดสอบ" ของจุดหมุนตัว ที่หน้านี้เคย
             แสดงเป็น "ไม่เชื่อมต่อ" ทั้งที่เป็นพฤติกรรมปกติของบอร์ดระหว่างจับเวลา */}
         <div className="live-links" aria-label="สถานะการเชื่อมต่อ">
           <DeviceStatusChip deviceId="chair" />
@@ -268,6 +272,20 @@ export default function LiveStatusPage() {
         })}
       </ol>
 
+      {/* อยู่นอก .live-stage ที่เป็น aria-live แบบ atomic โดยตั้งใจ - ไม่งั้นโปรแกรมอ่านหน้าจอ
+          จะอ่านข้อความสถานะทั้งก้อนซ้ำทุกวินาทีที่ตัวเลขเปลี่ยน */}
+      {nextRoundIn !== null && (
+        <p className="live-countdown">
+          {nextRoundIn > 0 ? (
+            <>
+              รอบถัดไปพร้อมในอีก <strong>{nextRoundIn}</strong> วินาที
+            </>
+          ) : (
+            "กำลังเตรียมรอบถัดไป…"
+          )}
+        </p>
+      )}
+
       {stage.key === "complete" && (
         <section
           className={`live-result ${result ? (passed ? "live-result--pass" : "live-result--review") : "live-result--pending"}`}
@@ -295,7 +313,7 @@ export default function LiveStatusPage() {
         </section>
       )}
 
-      {/* สามแหล่งข้อมูลวางไว้ข้างกัน ไม่ยุบเป็นคะแนนเดียว — การรวมประวัติโรคเข้ากับ
+      {/* สามแหล่งข้อมูลวางไว้ข้างกัน ไม่ยุบเป็นคะแนนเดียว - การรวมประวัติโรคเข้ากับ
           ผลวัดให้เป็นระดับความเสี่ยงตัวเดียวคือการตัดสินทางคลินิก ที่ทำได้คือบอกว่า
           สองแหล่งสอดคล้องกันไหม แล้วให้เจ้าหน้าที่เป็นคนตัดสิน */}
       {stage.key === "complete" && result && (
@@ -304,7 +322,7 @@ export default function LiveStatusPage() {
             <span className="live-detail__label">ผู้ทดสอบ</span>
             <strong>{patient?.name ?? subject.patientName ?? "ไม่ระบุ"}</strong>
             <p>
-              {result.trialNo ? `รอบที่ ${result.trialNo}` : "—"}
+              {result.trialNo ? `รอบที่ ${result.trialNo}` : "-"}
               {result.checkpointSec > 0 && ` · ขาไป ${result.checkpointSec.toFixed(1)} วิ`}
               {result.returnSec > 0 && ` · ขากลับ ${result.returnSec.toFixed(1)} วิ`}
             </p>
@@ -325,7 +343,7 @@ export default function LiveStatusPage() {
                 <strong className="live-detail__muted">ไม่มีผล</strong>
                 <p>
                   {assessment
-                    ? "กล้องบันทึกรอบนี้ไว้ แต่จับท่าเดินไม่ได้ (ผู้ทดสอบอาจอยู่นอกเฟรม)"
+                    ? "กล้องบันทึกรอบนี้ไว้ แต่จับท่าเดินไม่ได้ (ผู้ทดสอบอาจอยู่นอกภาพกล้อง)"
                     : "รอบนี้กล้องไม่ได้บันทึก (ยังไม่ได้เปิดกล้อง หรือเปิดหลังผู้ทดสอบลุกแล้ว)"}
                 </p>
               </>

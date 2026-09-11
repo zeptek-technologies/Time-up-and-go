@@ -2,6 +2,7 @@ import DataViewport from "./DataViewport";
 import Pagination from "./Pagination";
 import DataSearch from "./DataSearch";
 import { usePagination } from "../hooks/usePagination";
+import PatientProgressModal from "./PatientProgressModal";
 import { useState } from "react";
 import type { TugData } from "../hooks/useTugData";
 import { riskClass, riskThai } from "../lib/meta";
@@ -20,8 +21,9 @@ export default function RecordsSection({ data }: { data: TugData }) {
   const [filter, setFilter] = useState("ALL");
   const [search, setSearch] = useState("");
   // Aborted trials stay in the table for audit (spec section 3) but are hidden
-  // by default so the common case — reviewing real results — isn't cluttered.
+  // by default so the common case - reviewing real results - isn't cluttered.
   const [showAborted, setShowAborted] = useState(false);
+  const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
 
   const onAssign = async (id: string, pid: string) => {
     try {
@@ -33,7 +35,7 @@ export default function RecordsSection({ data }: { data: TugData }) {
   };
 
   let rows = showAborted ? results : results.filter((r) => r.status === "completed");
-  // กรองระดับความเสี่ยงเฉพาะรอบที่สำเร็จ — รอบที่ยกเลิกเก็บ "เวลาที่ผ่านไปก่อนถูก
+  // กรองระดับความเสี่ยงเฉพาะรอบที่สำเร็จ - รอบที่ยกเลิกเก็บ "เวลาที่ผ่านไปก่อนถูก
   // ยกเลิก" ไม่ใช่เวลา TUG จริง การเอาไปจัดระดับจึงได้ผลที่ขัดกับช่องผลของมันเอง
   // (แถวขึ้นว่า "ยกเลิก" แต่ดันโผล่มาในตัวกรอง "สูง")
   if (filter !== "ALL") {
@@ -83,7 +85,7 @@ export default function RecordsSection({ data }: { data: TugData }) {
               className={`filter-chip ${showAborted ? "filter-chip--active" : ""}`}
               aria-pressed={showAborted}
               onClick={() => setShowAborted((v) => !v)}
-              title="รอบที่ถูกยกเลิก/หมดเวลา — ไม่ถูกนำไปคิดสถิติ"
+              title="รอบที่ถูกยกเลิก/หมดเวลา - ไม่ถูกนำไปคิดสถิติ"
             >
               แสดงรอบที่ยกเลิก ({abortedCount})
             </button>
@@ -96,7 +98,7 @@ export default function RecordsSection({ data }: { data: TugData }) {
           <thead>
             <tr>
               <th>ลำดับ</th><th>ผู้ทดสอบ</th><th>เวลาที่ทดสอบ</th><th>รอบที่</th>
-              <th>ไป (Checkpoint)</th><th>กลับ</th><th>เวลารวม</th><th>ระดับความเสี่ยง</th><th>จัดการ</th>
+              <th>ขาไป (ถึงจุดหมุนตัว)</th><th>กลับ</th><th>เวลารวม</th><th>ระดับความเสี่ยง</th><th>จัดการ</th>
             </tr>
           </thead>
           <tbody>
@@ -108,7 +110,7 @@ export default function RecordsSection({ data }: { data: TugData }) {
                 const level = riskLevelOf(r.totalSec);
                 const aborted = r.status === "aborted";
                 return (
-                  <tr key={r.id} style={aborted ? { opacity: 0.55 } : undefined}>
+                  <tr key={r.id} className="data-row-clickable" style={aborted ? { opacity: 0.55 } : undefined} onClick={() => r.patientId && setSelectedPatientId(r.patientId)} onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && r.patientId) { e.preventDefault(); setSelectedPatientId(r.patientId); } }} tabIndex={r.patientId ? 0 : undefined}>
                     <td data-label="ลำดับ" style={{ fontWeight: 600, color: "var(--clr-text-secondary)" }}>{pagination.offset + i + 1}</td>
                     <td data-label="ผู้ทดสอบ">
                       <span className={`patient-name-badge ${pn ? "" : "patient-name-badge--empty"}`}>
@@ -116,20 +118,20 @@ export default function RecordsSection({ data }: { data: TugData }) {
                       </span>
                     </td>
                     <td data-label="เวลาที่ทดสอบ">{formatThai(r.finishedAt)}</td>
-                    <td data-label="รอบที่">{r.trialNo > 0 ? r.trialNo : "—"}</td>
-                    <td data-label="ไป (Checkpoint)">{r.checkpointSec.toFixed(2)} วินาที</td>
-                    <td data-label="กลับ">{r.returnSec > 0 ? `${r.returnSec.toFixed(2)} วินาที` : "—"}</td>
+                    <td data-label="รอบที่">{r.trialNo > 0 ? r.trialNo : "-"}</td>
+                    <td data-label="ขาไป (ถึงจุดหมุนตัว)">{r.checkpointSec.toFixed(2)} วินาที</td>
+                    <td data-label="กลับ">{r.returnSec > 0 ? `${r.returnSec.toFixed(2)} วินาที` : "-"}</td>
                     <td data-label="เวลารวม"><strong>{r.totalSec.toFixed(2)} วินาที</strong></td>
                     <td data-label="ระดับความเสี่ยง">
                       {aborted ? (
-                        <span className="risk-badge" title="รอบนี้ถูกยกเลิก/หมดเวลา — เวลาที่ได้ไม่ใช่ผลจริง">ยกเลิก</span>
+                        <span className="risk-badge" title="รอบนี้ถูกยกเลิก/หมดเวลา - เวลาที่ได้ไม่ใช่ผลจริง">ยกเลิก</span>
                       ) : (
                         <span className={`risk-badge risk-badge--${riskClass(level)}`}><span className="risk-badge__dot" />{riskThai(level)}</span>
                       )}
                     </td>
                     <td data-label="จัดการ">
-                      <select className="assign-select" value={r.patientId} onChange={(e) => onAssign(r.id, e.target.value)}>
-                        <option value="">— เลือก —</option>
+                      <select className="assign-select" value={r.patientId} onClick={(e) => e.stopPropagation()} onChange={(e) => onAssign(r.id, e.target.value)}>
+                        <option value="">- เลือก -</option>
                         {patients.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                       </select>
                     </td>
@@ -141,6 +143,7 @@ export default function RecordsSection({ data }: { data: TugData }) {
         </table>
       </DataViewport>
       <Pagination label="ผลการทดสอบ" {...pagination} />
+      {selectedPatientId && <PatientProgressModal patient={patients.find((p) => p.id === selectedPatientId) ?? null} results={results.filter((r) => r.patientId === selectedPatientId)} assessments={[]} onClose={() => setSelectedPatientId(null)} />}
     </section>
   );
 }
