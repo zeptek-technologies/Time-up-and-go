@@ -20,6 +20,7 @@ import { getDiseaseMeta } from "../lib/meta";
 import { assessConsistency } from "../lib/riskContext";
 import { riskLevelOf, type RiskLevel } from "../lib/tugRisk";
 import "../live-status.css";
+import tugCareLogo from "../assets/brand/tug-care-logo-192.png";
 
 type StageKey =
   | "connecting"
@@ -220,10 +221,7 @@ export default function LiveStatusPage() {
       <header className="live-header">
         <a className="live-brand" href="/" aria-label="กลับไปหน้า TUG Care Board">
           <span className="live-brand__mark" aria-hidden="true">
-            <svg viewBox="0 0 64 64">
-              <circle cx="32" cy="32" r="30" fill="currentColor" opacity="0.15" />
-              <path d="M28 16h8v12h12v8H36v12h-8V36H16v-8h12V16z" fill="currentColor" />
-            </svg>
+            <img src={tugCareLogo} alt="" />
           </span>
           <span>
             <strong>TUG Care Board</strong>

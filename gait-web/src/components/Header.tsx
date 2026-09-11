@@ -1,6 +1,8 @@
 // Sticky top header + horizontal quick-jump nav (replaces the old sidebar).
 import DeviceStatusChip from "./DeviceStatusChip";
 import DeviceResetButton from "./DeviceResetButton";
+// ไฟล์ย่อ 192px (~20KB) — ต้นฉบับ 1024px หนัก ~370KB แต่แสดงแค่ประมาณ 40px
+import tugCareLogo from "../assets/brand/tug-care-logo-192.png";
 
 import { SECTIONS, type SectionKey } from "../lib/navigation";
 
@@ -15,10 +17,7 @@ export default function Header({ active, onNavigate }: Props) {
       <div className="app-header__inner">
         <button className="app-brand" aria-label="TUG Care Board - กลับภาพรวม" type="button" onClick={() => onNavigate("overview")}>
           <span className="app-brand__icon" aria-hidden="true">
-            <svg viewBox="0 0 64 64">
-              <circle cx="32" cy="32" r="30" fill="currentColor" opacity="0.15" />
-              <path d="M28 16h8v12h12v8H36v12h-8V36H16v-8h12V16z" fill="currentColor" />
-            </svg>
+            <img src={tugCareLogo} alt="" />
           </span>
           <span className="app-brand__text">
             <strong>TUG Care Board</strong>

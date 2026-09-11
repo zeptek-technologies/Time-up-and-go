@@ -78,7 +78,12 @@
   background: var(--clr-primary-50);
   color: var(--clr-primary-600);
 }
-.app-brand__icon svg { width: 26px; height: 26px; }
+.app-brand__icon img {
+  display: block;
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+}
 .app-brand__text { display: flex; flex-direction: column; line-height: 1.15; text-align: left; }
 .app-brand__text strong { font-size: 1.02rem; color: var(--clr-text); font-weight: 800; }
 .app-brand__text small { font-size: 0.68rem; color: var(--clr-text-secondary); letter-spacing: 0.02em; }

@@ -8,6 +8,7 @@ import { getDiseaseMeta, riskClass, riskThai } from "../lib/meta";
 import { riskLevelOf } from "../lib/tugRisk";
 import { formatIsoThai, formatThai } from "../lib/time";
 import { IconClose, IconPatients, IconPlus, IconUser } from "./Icons";
+import tugCareLogo from "../assets/brand/tug-care-logo-192.png";
 
 export default function PatientManagementPage() {
   const data = useTugData();
@@ -37,7 +38,9 @@ export default function PatientManagementPage() {
       <header className="pm-header">
         <div className="pm-header__inner">
           <a className="pm-brand" href="./" aria-label="กลับไปหน้าภาพรวม">
-            <span className="pm-brand__mark" aria-hidden="true">+</span>
+            <span className="pm-brand__mark" aria-hidden="true">
+              <img src={tugCareLogo} alt="" />
+            </span>
             <span>
               <strong>TUG Care Board</strong>
               <small>ทะเบียนและประวัติผู้ทดสอบ</small>

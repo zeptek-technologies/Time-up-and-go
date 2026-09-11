@@ -25,7 +25,14 @@ textarea { resize: none; min-height: 100px; }
 .app-shell { display: block; }
 .app-header { background: var(--clr-surface); box-shadow: none; backdrop-filter: none; }
 .app-header__inner { max-width: 1500px; padding: 16px 28px 10px; row-gap: 16px; }
-.app-brand__icon { background: var(--clr-primary-600); color: var(--clr-surface); border-radius: 14px; width: 44px; height: 44px; }
+.app-brand__icon {
+  background: var(--clr-primary-50);
+  color: var(--clr-primary-600);
+  border: 1px solid var(--clr-primary-100);
+  border-radius: 14px;
+  width: 44px;
+  height: 44px;
+}
 .app-brand__text strong { font-size: 1.05rem; }
 .app-nav { gap: 6px; scrollbar-width: thin; padding-bottom: 6px; }
 .app-nav::-webkit-scrollbar { display: block; height: 5px; }
@@ -73,7 +80,9 @@ textarea { resize: none; min-height: 100px; }
 .gc-cam__off-hint { max-width: 280px; line-height: 1.7; }
 .gc-controls { padding: 22px; }
 .pm-header { background: var(--clr-surface); box-shadow: none; }
-.pm-brand__mark { background: var(--clr-primary-600); color: var(--clr-surface); border-radius: 14px; }
+/* พื้นฟ้าอ่อนแบบเดียวกับ .app-brand__icon — พื้นน้ำเงินเข้มเดิมทำให้โลโก้สีน้ำเงินจมหาย */
+.pm-brand__mark { background: var(--clr-primary-50); border: 1px solid var(--clr-primary-100); border-radius: 14px; }
+.pm-brand__mark img { display: block; width: 32px; height: 32px; object-fit: contain; }
 .pm-main { padding-top: 40px; }
 .pm-intro { border-bottom: 0; margin-bottom: 28px; }
 .pm-roster, .pm-detail { border-radius: var(--r-panel); box-shadow: var(--shadow-sm); }
