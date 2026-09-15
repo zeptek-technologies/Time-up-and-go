@@ -10,6 +10,7 @@ import {
   subscribeGaitAssessments,
   subscribePatients,
   subscribeResults,
+  updatePatient,
   type GaitAssessment,
   type Patient,
   type TugResult,
@@ -21,7 +22,7 @@ export interface TugData {
   conn: ConnState;
   connLabel: string;
   patients: Patient[];
-  /** Every trial, including aborted ones — for the audit table. */
+  /** Every trial, including aborted ones - for the audit table. */
   results: TugResult[];
   /**
    * Only trials the board finished properly. Aborted trials record the time
@@ -33,6 +34,7 @@ export interface TugData {
   assessmentsError: string | null;
   patientName: (id: string) => string | null;
   addPatient: typeof addPatient;
+  updatePatient: typeof updatePatient;
   removePatient: (id: string) => Promise<void>;
   assignResult: typeof assignResultToPatient;
   assignAssessment: typeof assignGaitAssessmentToPatient;
@@ -81,7 +83,7 @@ export function useTugData(): TugData {
 
   const connLabel =
     conn === "online"
-      ? `เชื่อมต่อแล้ว — TUG ${results.length} / ประเมินโรค ${assessments.length}`
+      ? `เชื่อมต่อแล้ว - TUG ${results.length} / ประเมินโรค ${assessments.length}`
       : conn === "error"
         ? "เกิดข้อผิดพลาด"
         : "กำลังเชื่อมต่อ...";
@@ -103,6 +105,7 @@ export function useTugData(): TugData {
     assessmentsError,
     patientName,
     addPatient,
+    updatePatient,
     removePatient,
     assignResult: assignResultToPatient,
     assignAssessment: assignGaitAssessmentToPatient,

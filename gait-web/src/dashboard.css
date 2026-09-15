@@ -1186,6 +1186,8 @@ body.nav-open{overflow:hidden;}
 .condition-badge--low{background:var(--clr-low-bg);color:var(--clr-low);}
 .condition-badge--mod{background:var(--clr-mod-bg);color:var(--clr-mod);}
 .condition-badge--high{background:var(--clr-high-bg);color:var(--clr-high);}
+/* กลาง ๆ สำหรับผลที่ไม่ใช่ระดับความเสี่ยง เช่น "ไม่มีข้อมูล" */
+.condition-badge--none{background:#f1f5f9;color:var(--clr-text-secondary);}
 
 .score-stack{
   display:flex;

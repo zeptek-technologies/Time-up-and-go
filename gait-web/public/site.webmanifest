@@ -1,0 +1,20 @@
+{
+  "name": "TUG Care Board",
+  "short_name": "TUG Care",
+  "description": "Timed Up & Go monitoring dashboard",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "theme_color": "#2563eb",
+  "background_color": "#f0f7ff",
+  "display": "standalone"
+}

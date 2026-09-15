@@ -19,6 +19,7 @@ import {
   type DocumentData,
 } from "firebase/firestore";
 import type { GaitSessionRecorder } from "./recorder";
+import type { ChairDistances, CheckpointDistances } from "./deviceConfig";
 
 const firebaseConfig = {
   apiKey: "AIzaSyC4dFT0u_NWRmsbuQygQhQnW6nGuRUn4D8",
@@ -68,6 +69,7 @@ export interface Patient {
   age: number | null;
   gender: string;
   note: string;
+  conditions: string[];
 }
 
 // One document = one TRIAL (not a whole session). Firmware v2 adds 9 fields on
@@ -86,7 +88,10 @@ export interface TugResult {
   sessionId: string;
   trialNo: number;
   fwVersion: string;
-  patientId: string; // legacy: manual web-side assignment
+  // Explicit web-side assignment, or subject_key when the ESP32 created the
+  // result. The firmware intentionally stores the patient document id in
+  // subject_key and does not write patient_id.
+  patientId: string;
 }
 
 export interface GaitAssessment {
@@ -98,6 +103,10 @@ export interface GaitAssessment {
   timestamp: string;
   timestampRaw: unknown;
   patientId: string;
+  // Which TUG trial this walk belongs to. Empty / 0 on records written before
+  // the camera was driven by the chair — those can only be matched by time.
+  sessionId: string;
+  trialNo: number;
   // Camera gait metrics. null on records written before step counting existed.
   stepCount: number | null;
   cadenceAvg: number | null;
@@ -130,6 +139,9 @@ export function subscribePatients(cb: (rows: Patient[]) => void, onError?: (e: E
           age: data.age ?? null,
           gender: data.gender ?? "",
           note: data.note ?? "",
+          conditions: Array.isArray(data.conditions)
+            ? data.conditions.filter((item): item is string => typeof item === "string")
+            : [],
         });
       });
       rows.sort((a, b) => a.name.localeCompare(b.name, "th"));
@@ -146,6 +158,14 @@ export function subscribeResults(cb: (rows: TugResult[]) => void, onError?: (e: 
       const rows: TugResult[] = [];
       snap.forEach((d) => {
         const data = d.data() as DocumentData;
+        const subjectKey = typeof data.subject_key === "string" ? data.subject_key : "";
+        // Results created by the chair contain subject_key but no patient_id.
+        // subject_key is the pseudonymous Firestore patient document id, so use
+        // it as the relation unless patient_id exists (including an intentional
+        // empty string written when staff manually unassign a legacy result).
+        const patientId = typeof data.patient_id === "string"
+          ? data.patient_id
+          : (subjectKey && subjectKey !== "unassigned" ? subjectKey : "");
         rows.push({
           id: d.id,
           checkpointSec: num(data.checkpoint_sec),
@@ -158,11 +178,11 @@ export function subscribeResults(cb: (rows: TugResult[]) => void, onError?: (e: 
           status: data.status === "aborted" ? "aborted" : "completed",
           startedAt: num(data.started_at),
           finishedAt: num(data.finished_at),
-          subjectKey: data.subject_key ?? "",
+          subjectKey,
           sessionId: data.session_id ?? "",
           trialNo: num(data.trial_no),
           fwVersion: data.fw_version ?? "",
-          patientId: data.patient_id ?? "",
+          patientId,
         });
       });
       // Newest first by real wall-clock time. The old sort parsed the doc ID,
@@ -199,6 +219,8 @@ export function subscribeGaitAssessments(
           timestamp: data.timestamp ?? "",
           timestampRaw: data.timestamp,
           patientId: data.patient_id ?? "",
+          sessionId: data.session_id ?? "",
+          trialNo: num(data.trial_no),
           stepCount: numOrNull(data.step_count),
           cadenceAvg: numOrNull(data.cadence_avg),
           stepTimeCvAvg: numOrNull(data.step_time_cv_avg),
@@ -238,12 +260,29 @@ export interface DeviceStatus {
   trialNo: number;
   // checkpoint only
   chairOnline: boolean;
+  light: string; // สีไฟที่หลอดกำลังแสดงจริง: not_ready|ready|stand_up|walking|passed|result_*
+  chairState: string; // สถานะเก้าอี้ที่ checkpoint ได้ยินทาง ESP-NOW — เร็วกว่า device_status/chair
+  //                     ตลอดช่วง RETURNING เพราะช่วงนั้นเก้าอี้หยุดคุย Firestore ไม่ให้จับเวลาเพี้ยน
+  // ค่าระยะที่บอร์ด "ใช้อยู่จริง" (0 = เฟิร์มแวร์รุ่นเก่า ยังไม่รายงาน)
+  cfgSitCm: number; // chair
+  cfgStandCm: number; // chair
+  cfgDetectCm: number; // checkpoint
+  /** ระยะที่อ่านได้ถูกต้องครั้งล่าสุด · -1 = ยังไม่เคยได้ echo ตั้งแต่บูต · null = บอร์ดไม่รายงาน */
+  distanceCm: number | null;
+  /** false = ช่วงนี้ไม่ได้รับเสียงสะท้อน (distanceCm เป็นค่าเก่า) · เฟิร์มแวร์เก่าไม่ส่งมา → ถือว่า true */
+  distanceLive: boolean;
+  /** chair: epoch วินาทีที่เข้าสถานะปัจจุบัน — ใช้นับถอยหลังช่วงพัก (0 = ไม่รู้) */
+  stateSince: number;
+  /** chair: ความยาวช่วงพักหลังจบรอบ (วินาที) · 0 = ไม่รายงาน */
+  cooldownSec: number;
 }
 
-const EMPTY_DEVICE: DeviceStatus = {
+export const EMPTY_DEVICE: DeviceStatus = {
   exists: false, lastSeen: 0, state: "", rssi: 0, fwVersion: "", uptimeSec: 0,
   checkpointOnline: false, pendingUploads: 0, armed: false,
   subjectKey: "", sessionId: "", trialNo: 0, chairOnline: false,
+  light: "", chairState: "",
+  cfgSitCm: 0, cfgStandCm: 0, cfgDetectCm: 0, distanceCm: null, distanceLive: false, stateSince: 0, cooldownSec: 0,
 };
 
 export function subscribeDeviceStatus(
@@ -273,6 +312,15 @@ export function subscribeDeviceStatus(
         sessionId: d.session_id ?? "",
         trialNo: num(d.trial_no),
         chairOnline: d.chair_online === true,
+        light: d.light ?? "",
+        chairState: d.chair_state ?? "",
+        cfgSitCm: num(d.cfg_sit_cm),
+        cfgStandCm: num(d.cfg_stand_cm),
+        cfgDetectCm: num(d.cfg_detect_cm),
+        distanceCm: numOrNull(d.distance_cm),
+        distanceLive: d.distance_live !== false,
+        stateSince: num(d.state_since),
+        cooldownSec: num(d.cooldown_sec),
       });
     },
     (err) => onError?.(err),
@@ -309,15 +357,161 @@ export async function requestReset(): Promise<void> {
   await setDoc(doc(db, "device_commands", "chair"), { reset_requested_at: nowSec }, { merge: true });
 }
 
+// ── Sensor distance settings ──
+// เว็บเขียน "ค่าที่ขอให้ใช้" ลง device_commands/<บอร์ด> ซึ่งบอร์ด poll อยู่แล้ว (เก้าอี้ทุก 4 วิ,
+// จุดหมุนตัวทุก 6 วิ) จึงไม่เพิ่มการอ่าน Firestore — บอร์ดตรวจช่วงค่า จำลง flash แล้วรายงาน
+// "ค่าที่ใช้อยู่จริง" กลับใน device_status/<บอร์ด> (cfg_*) หน้าเว็บเทียบสองค่าเพื่อบอกว่ารับแล้วหรือยัง
+// บอร์ดจะไม่เปลี่ยนเกณฑ์ระหว่างรอบทดสอบ — ค่าที่ขอค้างอยู่ในเอกสาร และถูกหยิบไปใช้หลังจบรอบเอง
+export interface DeviceConfigRequest {
+  sitCm: number | null;
+  standCm: number | null;
+  detectCm: number | null;
+  setAt: number; // epoch วินาทีที่บันทึกล่าสุด
+}
+
+export function subscribeDeviceConfig(
+  deviceId: DeviceId,
+  cb: (c: DeviceConfigRequest) => void,
+  onError?: (e: Error) => void,
+) {
+  return onSnapshot(
+    doc(db, "device_commands", deviceId),
+    (snap) => {
+      const d = (snap.data() as DocumentData) ?? {};
+      cb({
+        sitCm: numOrNull(d.cfg_sit_cm),
+        standCm: numOrNull(d.cfg_stand_cm),
+        detectCm: numOrNull(d.cfg_detect_cm),
+        setAt: num(d.cfg_set_at),
+      });
+    },
+    (err) => onError?.(err),
+  );
+}
+
+export async function saveChairDistances(v: ChairDistances): Promise<void> {
+  await ensureAuth();
+  await setDoc(
+    doc(db, "device_commands", "chair"),
+    { cfg_sit_cm: v.sitCm, cfg_stand_cm: v.standCm, cfg_set_at: Math.floor(Date.now() / 1000) },
+    { merge: true },
+  );
+}
+
+export async function saveCheckpointDistances(v: CheckpointDistances): Promise<void> {
+  await ensureAuth();
+  await setDoc(
+    doc(db, "device_commands", "checkpoint"),
+    { cfg_detect_cm: v.detectCm, cfg_set_at: Math.floor(Date.now() / 1000) },
+    { merge: true },
+  );
+}
+
+// ── Who is being tested right now ──
+// The camera tab and the live-status screen are separate pages (often separate
+// devices), so "the selected subject" cannot live in React state — it has to
+// travel through Firestore.
+//
+// It rides on device_commands/chair rather than a new collection because the
+// board ALREADY reads subject_key and session_id from there (see checkCommands()
+// in ESP_Chair_v2.ino). Writing them here means the board stamps tug_results
+// with the same subject on its own — no firmware change, no new rules needed.
+// patient_id / patient_name are extra fields the board simply ignores.
+export interface ActiveSubject {
+  patientId: string;
+  patientName: string;
+  sessionId: string;
+}
+
+const NO_SUBJECT: ActiveSubject = { patientId: "", patientName: "", sessionId: "" };
+
+export function subscribeActiveSubject(
+  cb: (s: ActiveSubject) => void,
+  onError?: (e: Error) => void,
+) {
+  return onSnapshot(
+    doc(db, "device_commands", "chair"),
+    (snap) => {
+      const d = (snap.data() as DocumentData) ?? {};
+      cb({
+        patientId: d.patient_id ?? "",
+        patientName: d.patient_name ?? "",
+        sessionId: d.session_id ?? "",
+      });
+    },
+    (err) => onError?.(err),
+  );
+}
+
+/**
+ * Announce which subject the next trials belong to. Returns the new session id.
+ *
+ * ⚠️ Every call starts a NEW session, and the board resets trial_no to 1 whenever
+ * session_id changes — so call this on an actual staff selection, never on every
+ * render, and never mid-session.
+ */
+export async function setActiveSubject(patientId: string, patientName = ""): Promise<ActiveSubject> {
+  await ensureAuth();
+  const nowSec = Math.floor(Date.now() / 1000);
+  // The board stores these in char[32], so keep them short. Firestore auto-ids
+  // are 20 chars and "session_<10-digit epoch>" is 18 — both fit with room spare.
+  const next: ActiveSubject = patientId
+    ? { patientId, patientName, sessionId: `session_${nowSec}` }
+    : NO_SUBJECT;
+
+  await setDoc(
+    doc(db, "device_commands", "chair"),
+    {
+      subject_key: patientId || "unassigned",
+      session_id: next.sessionId || "unassigned",
+      patient_id: next.patientId,
+      patient_name: next.patientName,
+      subject_set_at: nowSec,
+    },
+    { merge: true },
+  );
+  return next;
+}
+
 // ── Patient CRUD ──
-export async function addPatient(name: string, age: string, gender: string, note: string) {
+export async function addPatient(
+  name: string,
+  age: string,
+  gender: string,
+  note: string,
+  conditions: string[] = [],
+) {
   await ensureAuth();
   await addDoc(collection(db, "patients"), {
     name,
     age: age ? Number(age) : null,
     gender: gender || "",
     note: note || "",
+    conditions,
     created_at: serverTimestamp(),
+  });
+}
+
+/** ฟิลด์ที่แก้ได้จากหน้าจัดการผู้ทดสอบ (id/created_at แก้ไม่ได้) */
+export interface PatientEdit {
+  name: string;
+  age: string;
+  gender: string;
+  note: string;
+  conditions: string[];
+}
+
+// แก้ทะเบียนเดิมแทนการลบแล้วสร้างใหม่ — deletePatient() ตัด patient_id ของผลเก่า
+// ทิ้งทั้งหมด การ "แก้ด้วยการสร้างใหม่" จึงเท่ากับทำประวัติหาย
+export async function updatePatient(id: string, fields: PatientEdit) {
+  await ensureAuth();
+  await updateDoc(doc(db, "patients", id), {
+    name: fields.name,
+    age: fields.age ? Number(fields.age) : null,
+    gender: fields.gender,
+    note: fields.note,
+    conditions: fields.conditions,
+    updated_at: serverTimestamp(),
   });
 }
 
@@ -346,11 +540,19 @@ export interface UploadOutcome {
   documentId: string | null;
 }
 
+export interface AssessmentContext {
+  patientId?: string;
+  cameraMode?: "front" | "front+side";
+  /** TUG trial this walk belongs to — captured when the chair said RUNNING. */
+  sessionId?: string;
+  trialNo?: number;
+}
+
 export async function uploadAssessment(
   recorder: GaitSessionRecorder,
-  patientId = "",
-  cameraMode: "front" | "front+side" = "front",
+  ctx: AssessmentContext = {},
 ): Promise<UploadOutcome> {
+  const { patientId = "", cameraMode = "front", sessionId = "", trialNo = 0 } = ctx;
   const { highestRisk, riskPercentage } = recorder.result();
   const round1 = (n: number) => (Number.isFinite(n) ? Math.round(n * 10) / 10 : null);
   const payload = {
@@ -370,6 +572,10 @@ export async function uploadAssessment(
     // by both cameras (see recorder.recordFused).
     camera_mode: cameraMode,
     patient_id: patientId,
+    // Ties this walk to one TUG trial so the live screen can show the time and
+    // the gait reading from the SAME round instead of guessing by timestamp.
+    session_id: sessionId,
+    trial_no: trialNo,
     source: "web",
   };
   try {

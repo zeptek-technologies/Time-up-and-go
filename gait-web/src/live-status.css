@@ -1,0 +1,493 @@
+/* Dedicated second-screen view for the live ESP32-guided TUG flow.
+   One dominant instruction is readable at distance; connection and
+   progress remain supporting evidence instead of competing dashboards. */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.app-nav__external {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  text-decoration: none;
+  margin-left: 6px;
+  border-left: 1px solid var(--clr-border);
+  border-radius: 0 var(--r-field) var(--r-field) 0;
+}
+
+.live-page {
+  --live-accent: var(--clr-primary-600);
+  --live-soft: var(--clr-primary-50);
+  --live-border: var(--clr-primary-200);
+  min-height: 100vh;
+  padding: clamp(18px, 3vw, 34px) clamp(18px, 5vw, 72px);
+  background:
+    linear-gradient(180deg, #fff 0, #fff 92px, transparent 92px),
+    var(--clr-bg);
+  color: var(--clr-text);
+}
+
+.live-page--ready {
+  --live-accent: #0d9488;
+  --live-soft: #f0fdfa;
+  --live-border: #99f6e4;
+}
+.live-page--walking {
+  --live-accent: #2563eb;
+  --live-soft: #eff6ff;
+  --live-border: #bfdbfe;
+}
+.live-page--checkpoint {
+  --live-accent: #7c3aed;
+  --live-soft: #f5f3ff;
+  --live-border: #ddd6fe;
+}
+.live-page--complete {
+  --live-accent: #0d9488;
+  --live-soft: #f0fdfa;
+  --live-border: #99f6e4;
+}
+.live-page--offline {
+  --live-accent: #dc2626;
+  --live-soft: #fef2f2;
+  --live-border: #fecaca;
+}
+.live-page--preparing,
+.live-page--waiting,
+.live-page--connecting {
+  --live-accent: #64748b;
+  --live-soft: #f8fafc;
+  --live-border: #cbd5e1;
+}
+
+.live-header {
+  max-width: 1380px;
+  min-height: 58px;
+  margin: 0 auto clamp(28px, 5vh, 56px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.live-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--clr-text);
+  text-decoration: none;
+}
+.live-brand:focus-visible {
+  outline: 2px solid var(--clr-primary-600);
+  outline-offset: 5px;
+  border-radius: var(--r-field);
+}
+.live-brand__mark {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  color: var(--clr-primary-600);
+}
+/* กรอบโลโก้แบบเดียวกับแถบเมนูหน้าหลัก (.app-brand__icon) — พื้นฟ้าอ่อนให้โลโก้สีน้ำเงิน/เขียวเด่น */
+.live-brand__mark {
+  border-radius: 12px;
+  background: var(--clr-primary-50);
+  border: 1px solid var(--clr-primary-100);
+}
+.live-brand__mark img { display: block; width: 38px; height: 38px; object-fit: contain; }
+.live-brand > span:last-child { display: flex; flex-direction: column; line-height: 1.2; }
+.live-brand strong { font-size: 1.05rem; }
+.live-brand small { color: var(--clr-text-secondary); font-size: 0.72rem; }
+
+/* การ์ดสถานะบอร์ดใช้ .device-chip ตัวเดียวกับหน้าหลัก (นิยามใน app-shell.css
+   ซึ่งโหลดทุกหน้าอยู่แล้ว) หน้านี้จึงเหลือแค่จัดวางแถว ไม่ต้องนิยามสีเอง
+   จะได้ไม่มีทางเพี้ยนกันเวลาแก้สีที่หน้าหลัก */
+.live-links {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+}
+/* หน้าหลักซ่อนเวลา "อัปเดตล่าสุด" เมื่อจอแคบกว่า 1400px เพราะแถวหัวที่นั่นมี
+   เมนูมาแย่งที่ด้วย แต่หน้านี้มีแค่โลโก้กับการ์ดสถานะ พื้นที่เหลือเฟือ —
+   และเป็นจอที่เจ้าหน้าที่มองจากไกล ยิ่งต้องรู้ว่าข้อมูลเก่าแค่ไหน จึงคืนค่าให้แสดง */
+.live-links .device-chip__ago { display: inline; }
+/* redesign.css ให้ป้ายกว้าง 100% (สำหรับแถบเมนูหน้าหลัก) — ในแถวนี้ป้ายสองอันจึงถูกบีบจนกล่องชื่อบอร์ด
+   แคบกว่าตัวอักษร แล้วชื่อ "จุดหมุนตัว" ล้นไปทับเวลา "…ที่แล้ว" หน้านี้มีที่ว่างเหลือเฟือ
+   จึงให้ป้ายกว้างตามข้อความจริง และห้ามชื่อบอร์ดหด */
+.live-links .device-chip { width: auto; flex: 0 0 auto; }
+.live-links .device-chip__label { flex-shrink: 0; }
+
+.live-stage {
+  max-width: 1380px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(170px, 0.4fr) minmax(0, 1.6fr);
+  min-height: min(54vh, 540px);
+  border: 1px solid var(--live-border);
+  border-radius: var(--r-panel);
+  background: var(--clr-surface);
+  overflow: hidden;
+}
+
+.live-stage__signal {
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.7), transparent 48%),
+    var(--live-soft);
+  border-right: 1px solid var(--live-border);
+}
+.live-stage__signal > span {
+  width: clamp(82px, 10vw, 132px);
+  aspect-ratio: 1;
+  border: clamp(14px, 1.6vw, 22px) solid color-mix(in srgb, var(--live-accent) 18%, white);
+  border-radius: 50%;
+  background: var(--live-accent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--live-accent) 55%, white),
+    0 0 42px color-mix(in srgb, var(--live-accent) 25%, transparent);
+}
+
+.live-stage__copy {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: clamp(30px, 5vw, 74px);
+}
+.live-stage__eyebrow {
+  color: var(--live-accent);
+  font-size: clamp(0.76rem, 1.2vw, 0.95rem);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.live-stage h1 {
+  margin: 4px 0 clamp(24px, 4vh, 42px);
+  font-size: clamp(3rem, 8vw, 7.4rem);
+  line-height: 0.98;
+  letter-spacing: -0.055em;
+  color: var(--clr-text);
+  text-wrap: balance;
+}
+
+.live-instruction {
+  padding-top: clamp(18px, 2.5vh, 28px);
+  border-top: 1px solid var(--live-border);
+}
+.live-instruction > span,
+.live-result__label {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--clr-text-secondary);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.live-instruction h2 {
+  margin: 0;
+  color: var(--live-accent);
+  font-size: clamp(1.45rem, 3.3vw, 3rem);
+  line-height: 1.18;
+  text-wrap: balance;
+}
+.live-instruction p {
+  margin: 8px 0 0;
+  color: var(--clr-text-secondary);
+  font-size: clamp(0.9rem, 1.5vw, 1.1rem);
+}
+
+.live-progress {
+  max-width: 1380px;
+  margin: 18px auto 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  list-style: none;
+  border: 1px solid var(--clr-border);
+  border-radius: var(--r-panel);
+  background: #fff;
+  overflow: hidden;
+}
+.live-progress__step {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 15px 18px;
+  border-right: 1px solid var(--clr-border);
+  color: var(--clr-text-secondary);
+}
+.live-progress__step:last-child { border-right: 0; }
+.live-progress__number {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--clr-border);
+  border-radius: 50%;
+  background: #f8fafc;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+.live-progress__step > span:last-child {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.live-progress__step strong { font-size: 0.82rem; color: inherit; }
+.live-progress__step small {
+  overflow: hidden;
+  color: var(--clr-text-secondary);
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.live-progress__step--current {
+  color: var(--live-accent);
+  background: var(--live-soft);
+  box-shadow: inset 0 3px 0 var(--live-accent);
+}
+.live-progress__step--current .live-progress__number {
+  color: #fff;
+  border-color: var(--live-accent);
+  background: var(--live-accent);
+}
+.live-progress__step--done { color: #047857; }
+.live-progress__step--done .live-progress__number {
+  color: #fff;
+  border-color: #10b981;
+  background: #10b981;
+}
+
+/* นับถอยหลังช่วงพักหลังจบรอบ — ข้อความเล็กชิดขวาใต้ขั้น "เสร็จสิ้น" ไม่แย่งความสนใจจากผล */
+.live-countdown {
+  max-width: 1380px;
+  margin: 10px auto 0;
+  color: var(--clr-text-secondary);
+  font-size: 0.82rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.live-countdown strong { color: var(--live-accent); font-weight: 800; }
+
+.live-result {
+  max-width: 1380px;
+  margin: 18px auto 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 30px;
+  padding: clamp(22px, 3vw, 34px);
+  border: 1px solid var(--clr-border);
+  border-left: 5px solid var(--clr-primary-600);
+  border-radius: var(--r-panel);
+  background: #fff;
+}
+.live-result h2 {
+  margin: 0;
+  font-size: clamp(1.65rem, 3vw, 2.6rem);
+  line-height: 1.1;
+}
+.live-result p {
+  margin: 7px 0 0;
+  color: var(--clr-text-secondary);
+}
+.live-result--pass {
+  border-color: #a7f3d0;
+  border-left-color: #10b981;
+  background: #ecfdf5;
+  color: #047857;
+}
+.live-result--review {
+  border-color: #fde68a;
+  border-left-color: #f59e0b;
+  background: #fffbeb;
+  color: #92400e;
+}
+.live-result--pending { border-left-color: #64748b; }
+.live-result__time {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.live-result__time strong {
+  font-size: clamp(2.5rem, 6vw, 5rem);
+  line-height: 0.9;
+}
+.live-result__time span { font-size: 0.9rem; font-weight: 700; }
+
+/* ── สามแหล่งข้อมูลของรอบที่เพิ่งจบ + แถบสรุปความสอดคล้อง ──
+   auto-fit ทำให้จอกว้างได้ 3 ใบเรียงกัน จอแคบไหลลงเป็นคอลัมน์เองโดยไม่ต้องมี
+   breakpoint แยก — หน้านี้ถูกเปิดทั้งบนทีวีและบนแท็บเล็ตข้างเตียง */
+.live-detail {
+  max-width: 1380px;
+  margin: 14px auto 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+.live-detail__card,
+.live-verdict {
+  padding: 18px 20px;
+  border: 1px solid var(--clr-border);
+  border-radius: var(--r-panel);
+  background: #fff;
+}
+.live-detail__label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--clr-text-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.live-detail__card strong,
+.live-verdict strong {
+  display: block;
+  font-size: 1.2rem;
+  line-height: 1.3;
+}
+.live-detail__card p,
+.live-verdict p {
+  margin: 6px 0 0;
+  color: var(--clr-text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.live-detail__muted { color: var(--clr-text-secondary); font-weight: 600; }
+
+.live-detail__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.live-detail__tags li {
+  padding: 4px 10px;
+  border: 1px solid var(--clr-border);
+  border-radius: 999px;
+  background: var(--clr-bg);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+/* โรคที่อธิบายสิ่งที่กล้องเห็นได้ — เน้นให้เห็นว่า "อันนี้แหละที่ตรงกัน" */
+.live-detail__tags li.is-matched {
+  border-color: var(--clr-primary-200);
+  background: var(--clr-primary-50);
+  color: var(--clr-primary-700);
+}
+
+/* แถบสรุปกินเต็มแถวเสมอ เพราะเป็นบรรทัดที่เจ้าหน้าที่ต้องอ่านก่อนเพื่อน */
+.live-verdict { grid-column: 1 / -1; border-left: 5px solid var(--clr-border); }
+.live-verdict--match {
+  border-color: #a7f3d0;
+  border-left-color: #10b981;
+  background: #ecfdf5;
+}
+.live-verdict--unexplained {
+  border-color: #fecaca;
+  border-left-color: #ef4444;
+  background: #fef2f2;
+}
+.live-verdict--history-only {
+  border-color: #fde68a;
+  border-left-color: #f59e0b;
+  background: #fffbeb;
+}
+.live-verdict--clear {
+  border-color: #a7f3d0;
+  border-left-color: #10b981;
+  background: #f0fdf4;
+}
+.live-verdict--no-camera { border-left-color: #94a3b8; }
+
+.live-footer {
+  max-width: 1380px;
+  margin: 15px auto 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 20px;
+  color: var(--clr-text-secondary);
+  font-size: 0.72rem;
+  text-align: right;
+}
+.live-footer p { margin: 0; }
+
+@media (max-width: 760px) {
+  .app-nav__external { margin-left: 2px; }
+  .live-page {
+    padding: 14px;
+    background: var(--clr-bg);
+  }
+  .live-header {
+    align-items: flex-start;
+    margin-bottom: 18px;
+  }
+  .live-brand__mark { width: 38px; height: 38px; }
+  .live-brand__mark svg { width: 36px; height: 36px; }
+  .live-brand strong { font-size: 0.92rem; }
+  .live-brand small { font-size: 0.65rem; }
+  .live-links {
+    max-width: 160px;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  /* บนมือถือแถวหัวแคบจริง ๆ — ตัดเวลาออกเหมือนหน้าหลัก ข้อมูลยังอยู่ใน tooltip */
+  .live-links .device-chip__ago { display: none; }
+  .live-stage {
+    display: block;
+    min-height: 0;
+  }
+  .live-stage__signal {
+    min-height: 92px;
+    border-right: 0;
+    border-bottom: 1px solid var(--live-border);
+  }
+  .live-stage__signal > span { width: 60px; border-width: 10px; }
+  .live-stage__copy { padding: 24px 20px 26px; }
+  .live-stage h1 {
+    margin: 3px 0 22px;
+    font-size: clamp(2.5rem, 14vw, 4rem);
+  }
+  .live-instruction h2 { font-size: 1.45rem; }
+  .live-progress {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .live-progress__step {
+    padding: 11px 10px;
+    border-bottom: 1px solid var(--clr-border);
+  }
+  .live-progress__step:nth-child(2n) { border-right: 0; }
+  .live-progress__step:nth-last-child(-n + 2) { border-bottom: 0; }
+  .live-progress__number { width: 26px; height: 26px; }
+  .live-result {
+    display: block;
+    padding: 22px 18px;
+  }
+  .live-result__time { margin-top: 22px; }
+  .live-footer {
+    display: block;
+    padding-bottom: 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-page * { scroll-behavior: auto !important; }
+}

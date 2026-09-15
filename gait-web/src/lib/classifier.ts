@@ -142,9 +142,27 @@ export class RuleBasedSideGaitClassifier {
   }
 }
 
+/**
+ * ป้ายของ "ผลทำนายรายเฟรม" — ตกทุกอย่างที่ไม่เข้าเงื่อนไขเป็น Normal โดยตั้งใจ
+ * เพราะ status ที่รับเข้ามาเป็นข้อความจาก classifier เท่านั้น ("Normal / No
+ * Abnormal Pattern") ห้ามใช้กับค่าที่อ่านจาก Firestore — ดู storedGaitLabel()
+ */
 export function normalizePredictionLabel(status: string): GaitLabel {
   if (status.includes("Parkinsonian")) return "Parkinsonian";
   if (status.includes("Hemiplegic")) return "Hemiplegic";
   if (status.includes("Steppage")) return "Steppage";
   return "Normal";
+}
+
+const GAIT_LABELS: readonly string[] = ["Normal", "Parkinsonian", "Hemiplegic", "Steppage"];
+
+/**
+ * ป้ายของบันทึกใน gait_assessments — คืน null เมื่อ condition ไม่ใช่ป้ายจริง
+ * ("No Data" จากรอบที่กล้องไม่ได้เฟรมที่ประเมินได้เลย หรือ "Unknown" จากเอกสารเก่า)
+ *
+ * ห้ามใช้ normalizePredictionLabel กับค่าพวกนี้: มันจะตี "No Data" เป็น "Normal"
+ * แล้วรายงานว่าเดินปกติทั้งที่ไม่เคยวัดอะไรได้
+ */
+export function storedGaitLabel(condition: string): GaitLabel | null {
+  return GAIT_LABELS.includes(condition) ? (condition as GaitLabel) : null;
 }

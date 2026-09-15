@@ -4,13 +4,13 @@ import { riskLevelOf } from "../lib/tugRisk";
 import { formatThai } from "../lib/time";
 
 /**
- * The console strip: what staff need at a glance before touching anything —
+ * The console strip: what staff need at a glance before touching anything -
  * the last measured value and how the caseload is distributed across risk
  * bands. Replaces the old marketing hero, which spent ~40% of the first
  * desktop screen (53% on mobile) on a banner instead of product evidence.
  */
 export default function OverviewSection({ data }: { data: TugData }) {
-  // Stats use completed trials only — aborted ones hold a partial time.
+  // Stats use completed trials only - aborted ones hold a partial time.
   const { completedResults } = data;
   const count = completedResults.length;
   const avgTotal = count ? completedResults.reduce((s, r) => s + r.totalSec, 0) / count : 0;
@@ -52,7 +52,7 @@ export default function OverviewSection({ data }: { data: TugData }) {
             </>
           ) : (
             <>
-              <div><span className="readout__value">—</span></div>
+              <div><span className="readout__value">-</span></div>
               <span className="readout__meta">ยังไม่มีผลการทดสอบที่สำเร็จ</span>
             </>
           )}

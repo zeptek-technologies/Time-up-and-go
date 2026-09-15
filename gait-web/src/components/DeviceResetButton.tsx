@@ -10,8 +10,8 @@ export default function DeviceResetButton() {
 
   const onClick = () => {
     const ok = confirm(
-      "รีเซ็ต ESP32 (เก้าอี้) ทันที?\n" +
-        "การทดสอบที่กำลังทำอยู่ (ถ้ามี) จะถูกยกเลิก และบอร์ดจะออฟไลน์ชั่วคราว ~10-15 วินาที",
+      "เริ่มอุปกรณ์ที่เก้าอี้ใหม่ทันที?\n" +
+        "การทดสอบที่กำลังทำอยู่ (ถ้ามี) จะถูกยกเลิก และอุปกรณ์จะใช้งานไม่ได้ชั่วคราวประมาณ 10-15 วินาที",
     );
     if (ok) requestReset();
   };
@@ -22,13 +22,14 @@ export default function DeviceResetButton() {
       className="device-reset-btn"
       disabled={!online || pending}
       onClick={onClick}
-      title={!online ? "ต้องให้บอร์ดออนไลน์ก่อนถึงจะสั่งรีเซ็ตได้" : "สั่งรีบูต ESP32 จากระยะไกล"}
-      aria-label={pending ? "กำลังส่งคำสั่งรีเซ็ตบอร์ด" : "รีเซ็ตบอร์ด"}
+      title={!online ? "อุปกรณ์ต้องออนไลน์ก่อน จึงจะสั่งเริ่มใหม่ได้" : "สั่งให้อุปกรณ์ที่เก้าอี้เริ่มทำงานใหม่"}
+      aria-label={pending ? "กำลังส่งคำสั่งเริ่มอุปกรณ์ใหม่" : "เริ่มอุปกรณ์ใหม่"}
     >
       {/* Full label on roomy viewports; on phones the header row cannot fit
           it beside two status chips, so it collapses to the glyph while the
           accessible name above stays complete. */}
-      <span className="device-reset-btn__full">{pending ? "กำลังส่งคำสั่ง…" : "รีเซ็ตบอร์ด"}</span>
+      <span className="device-reset-btn__icon-wrap" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M20 11a8 8 0 1 0 1 4"/><path d="M20 5v6h-6"/></svg></span>
+      <span className="device-reset-btn__full">{pending ? "กำลังส่งคำสั่ง…" : "เริ่มอุปกรณ์ใหม่"}</span>
       <span className="device-reset-btn__icon" aria-hidden="true">⟳</span>
     </button>
   );

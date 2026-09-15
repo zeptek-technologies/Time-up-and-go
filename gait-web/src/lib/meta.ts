@@ -20,10 +20,16 @@ export const diseaseMeta: Record<string, { th: string; cls: string }> = {
   Parkinsonian: { th: "เสี่ยงพาร์กินสัน", cls: "mod" },
   Hemiplegic: { th: "เสี่ยงอัมพาตครึ่งซีก", cls: "high" },
   Steppage: { th: "เสี่ยงภาวะเท้าตก", cls: "mod" },
+  // ค่าที่ไม่ใช่ "ป้ายท่าเดิน": No Data = รอบที่กล้องไม่ได้เฟรมที่ประเมินได้เลย
+  // (recorder.result() เมื่อ totalFrames = 0), Unknown = เอกสารเก่าที่ไม่มีฟิลด์
+  // condition ทั้งสองต้องเป็นสีกลาง ไม่ใช่สีระดับความเสี่ยง ไม่งั้นตารางจะอ่าน
+  // เหมือนว่าตรวจแล้วพบอะไรบางอย่าง
+  "No Data": { th: "ไม่มีข้อมูล", cls: "none" },
+  Unknown: { th: "ไม่ทราบผล", cls: "none" },
 };
 
 export function getDiseaseMeta(condition: string) {
-  return diseaseMeta[condition] ?? { th: condition || "ไม่ระบุ", cls: "mod" };
+  return diseaseMeta[condition] ?? { th: condition || "ไม่ระบุ", cls: "none" };
 }
 
 // Time formatting lives in lib/time.ts (formatThai / formatIsoThai) so there is

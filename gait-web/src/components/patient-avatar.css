@@ -1,0 +1,26 @@
+:root {
+  --avatar-female-bg: #fce7f3;
+  --avatar-female-ink: #be185d;
+  --avatar-male-bg: var(--clr-primary-100);
+  --avatar-male-ink: var(--clr-primary-700);
+  --avatar-neutral-bg: #f1f5f9;
+  --avatar-neutral-ink: #64748b;
+}
+.patient-avatar {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--avatar-neutral-bg);
+  color: var(--avatar-neutral-ink);
+}
+.patient-avatar--female { background: var(--avatar-female-bg); color: var(--avatar-female-ink); }
+.patient-avatar--male { background: var(--avatar-male-bg); color: var(--avatar-male-ink); }
+.patient-avatar--large { width: 64px; height: 64px; }
+.patient-avatar img { width: 55%; height: 55%; object-fit: contain; filter: brightness(0) saturate(100%); }
+.patient-avatar--female img { filter: brightness(0) saturate(100%) invert(19%) sepia(74%) saturate(3000%) hue-rotate(315deg) brightness(80%); }
+.patient-avatar--male img { filter: brightness(0) saturate(100%) invert(27%) sepia(95%) saturate(2100%) hue-rotate(215deg) brightness(85%); }
+.patient-avatar--neutral img { filter: brightness(0) saturate(100%) invert(44%) sepia(15%) saturate(850%) hue-rotate(175deg) brightness(88%); }

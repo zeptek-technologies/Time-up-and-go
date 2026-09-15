@@ -4,7 +4,7 @@
 import { useDeviceStatus } from "../hooks/useDeviceStatus";
 
 // The firmware's on-board queue holds 8 results; past that it drops the oldest,
-// so hitting 8 means data may already be lost — escalate the warning.
+// so hitting 8 means data may already be lost - escalate the warning.
 const BUFFER_LIMIT = 8;
 
 export default function PendingUploadsBanner() {
@@ -19,13 +19,13 @@ export default function PendingUploadsBanner() {
       <div>
         <strong>
           {full
-            ? `บอร์ดมีผลค้างเต็มบัฟเฟอร์ (${chair.pendingUploads}/${BUFFER_LIMIT}) — อาจมีข้อมูลสูญหายแล้ว`
-            : `มีผลการทดสอบค้างอยู่บนบอร์ด ${chair.pendingUploads} รายการ`}
+            ? `อุปกรณ์เก็บผลที่ยังส่งไม่ได้ไว้เต็มแล้ว (${chair.pendingUploads}/${BUFFER_LIMIT}) - ผลบางรอบอาจหายไปแล้ว`
+            : `มีผลการทดสอบ ${chair.pendingUploads} รายการที่อุปกรณ์ยังส่งเข้าระบบไม่ได้`}
         </strong>
         <p className="pending-banner__hint">
           {full
-            ? "บอร์ดเก็บได้สูงสุด 8 รายการ เกินกว่านั้นจะทิ้งรายการเก่าสุด กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ตของบอร์ดโดยด่วน"
-            : "รายการที่แสดงบนหน้าจอยังไม่ครบ — บอร์ดจะส่งให้อัตโนมัติเมื่อกลับมาออนไลน์"}
+            ? "อุปกรณ์เก็บได้สูงสุด 8 รายการ ถ้าเกินจะลบรายการเก่าที่สุดทิ้ง กรุณาตรวจสอบอินเทอร์เน็ตของอุปกรณ์โดยด่วน"
+            : "รายการบนหน้าจอจึงยังไม่ครบ อุปกรณ์จะส่งให้เองเมื่อกลับมาออนไลน์"}
         </p>
       </div>
     </div>

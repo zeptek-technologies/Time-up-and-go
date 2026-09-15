@@ -26,6 +26,14 @@ interface Props {
 
 type Status = "off" | "loading" | "ready" | "error";
 
+// ป้ายสถานะกล้องที่แสดงบนหัวกล่อง — ค่า status เป็นรหัสภายใน ห้ามโชว์ตรง ๆ
+const STATUS_TH: Record<Status, string> = {
+  off: "ปิด",
+  loading: "กำลังเปิด",
+  ready: "พร้อม",
+  error: "ผิดพลาด",
+};
+
 // video.requestVideoFrameCallback isn't in older TS DOM libs; type it narrowly.
 type RVFCVideo = HTMLVideoElement & {
   requestVideoFrameCallback?: (cb: (now: number, meta: { mediaTime: number }) => void) => number;
@@ -225,7 +233,7 @@ export default function CameraView({ view, label, onFrame }: Props) {
               <option key={d.deviceId} value={d.deviceId}>{d.label}</option>
             ))}
           </select>
-          {status !== "off" && <span className={`gc-cam__badge gc-cam__badge--${status}`}>{status}</span>}
+          {status !== "off" && <span className={`gc-cam__badge gc-cam__badge--${status}`}>{STATUS_TH[status]}</span>}
           {on && (
             <button type="button" className="gc-cam__stop-btn" onClick={() => setOn(false)}>
               ปิดกล้อง
@@ -238,7 +246,7 @@ export default function CameraView({ view, label, onFrame }: Props) {
           <>
             <video ref={videoRef} className="gc-cam__video" muted playsInline />
             <canvas ref={canvasRef} className="gc-cam__overlay" />
-            {status === "loading" && <div className="gc-cam__hint">กำลังโหลดโมเดล + เปิดกล้อง…</div>}
+            {status === "loading" && <div className="gc-cam__hint">กำลังเตรียมกล้อง…</div>}
             {status === "error" && <div className="gc-cam__hint gc-cam__hint--error">กล้องผิดพลาด: {errorMsg}</div>}
           </>
         ) : (
@@ -246,7 +254,7 @@ export default function CameraView({ view, label, onFrame }: Props) {
             <button type="button" className="gc-cam__start-btn" onClick={() => setOn(true)}>
               เปิดกล้อง
             </button>
-            <p className="gc-cam__off-hint">กล้องยังไม่เปิด — กดเพื่อเริ่มตรวจจับท่าทางการเดิน</p>
+            <p className="gc-cam__off-hint">กล้องยังไม่เปิด กดเพื่อเริ่มตรวจจับท่าทางการเดิน</p>
           </div>
         )}
       </div>

@@ -1,3 +1,9 @@
+import DataViewport from "./DataViewport";
+import { useState } from "react";
+import Pagination from "./Pagination";
+import DataSearch from "./DataSearch";
+import { usePagination } from "../hooks/usePagination";
+import PatientProgressModal from "./PatientProgressModal";
 import type { TugData } from "../hooks/useTugData";
 import { getDiseaseMeta } from "../lib/meta";
 import { formatIsoThai } from "../lib/time";
@@ -6,6 +12,12 @@ const ORDER = ["Normal", "Parkinsonian", "Hemiplegic", "Steppage"];
 
 export default function DiseaseSection({ data }: { data: TugData }) {
   const { assessments, assessmentsError, patients, patientName, assignAssessment } = data;
+  const [selectedAssessment, setSelectedAssessment] = useState<typeof assessments[number] | null>(null);
+
+  const [search, setSearch] = useState("");
+  const query = search.trim().toLocaleLowerCase("th-TH");
+  const filtered = assessments.filter((item) => [patientName(item.patientId), item.id, getDiseaseMeta(item.condition).th, item.condition].join(" ").toLocaleLowerCase("th-TH").includes(query));
+  const pagination = usePagination(filtered, query);
 
   const onAssign = async (id: string, pid: string) => {
     try {
@@ -34,15 +46,15 @@ export default function DiseaseSection({ data }: { data: TugData }) {
         <article className="stat-card stat-card--accent">
           <div className="stat-card__body">
             <p className="stat-card__label">จำนวนผลประเมินโรค</p>
-            <h3 className="stat-card__value">{assessmentsError ? "—" : assessments.length}</h3>
+            <h3 className="stat-card__value">{assessmentsError ? "-" : assessments.length}</h3>
 
           </div>
         </article>
         <article className="stat-card">
           <div className="stat-card__body">
             <p className="stat-card__label">ผลล่าสุดที่พบ</p>
-            <h3 className="stat-card__value">{latestMeta ? latestMeta.th : "—"}</h3>
-            <p className="stat-card__hint">{latest ? (patientName(latest.patientId) ?? `ID: ${latest.id}`) : "รอข้อมูล"}</p>
+            <h3 className="stat-card__value">{latestMeta ? latestMeta.th : "-"}</h3>
+            <p className="stat-card__hint">{latest ? (patientName(latest.patientId) ?? `รหัสผล ${latest.id.slice(0, 8)}`) : "รอข้อมูล"}</p>
           </div>
         </article>
         <article className="stat-card">
@@ -72,7 +84,8 @@ export default function DiseaseSection({ data }: { data: TugData }) {
         })}
       </div>
 
-      <div className="table-wrap disease-table-wrap">
+      <div className="toolbar"><DataSearch label="ค้นหาผลประเมินโรค" placeholder="ค้นหาชื่อ รหัส หรือผลที่พบ" value={search} onChange={setSearch} /></div>
+      <DataViewport className="table-wrap disease-table-wrap data-viewport" label="ผลประเมินโรคในหน้านี้" resetKey={JSON.stringify([search, pagination.page, pagination.pageSize])}>
         <table className="results-table disease-table">
           <thead>
             <tr>
@@ -83,14 +96,14 @@ export default function DiseaseSection({ data }: { data: TugData }) {
             {assessmentsError ? (
               <tr><td colSpan={8} className="table-empty table-empty--error">
                 <div className="table-empty__inner">
-                  <p>ไม่สามารถโหลดข้อมูล gait_assessments ได้</p>
-                  <small>{assessmentsError}</small>
+                  <p>โหลดผลประเมินจากกล้องไม่สำเร็จ</p>
+                  <small title={assessmentsError}>กรุณาลองโหลดหน้าเว็บใหม่อีกครั้ง</small>
                 </div>
               </td></tr>
-            ) : assessments.length === 0 ? (
-              <tr><td colSpan={8} className="table-empty"><div className="table-empty__inner"><p>ยังไม่มีข้อมูลความเสี่ยงโรคจาก gait_assessments</p></div></td></tr>
+            ) : filtered.length === 0 ? (
+              <tr><td colSpan={8} className="table-empty"><div className="table-empty__inner"><p>{query ? "ไม่พบผลประเมินที่ตรงกับคำค้น" : "ยังไม่มีผลประเมินความเสี่ยงโรคจากกล้อง"}</p></div></td></tr>
             ) : (
-              assessments.map((item, i) => {
+              pagination.items.map((item, i) => {
                 const meta = getDiseaseMeta(item.condition);
                 const pn = patientName(item.patientId);
                 const scores = Object.entries(item.riskScores)
@@ -99,8 +112,8 @@ export default function DiseaseSection({ data }: { data: TugData }) {
                     <span key={k} className="score-pill">{getDiseaseMeta(k).th} <strong>{Number(v)}</strong></span>
                   ));
                 return (
-                  <tr key={item.id}>
-                    <td data-label="ลำดับ" style={{ fontWeight: 600, color: "var(--clr-text-secondary)" }}>{i + 1}</td>
+                  <tr key={item.id} className="data-row-clickable" onClick={() => item.patientId && setSelectedAssessment(item)} onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && item.patientId) { e.preventDefault(); setSelectedAssessment(item); } }} tabIndex={item.patientId ? 0 : undefined}>
+                    <td data-label="ลำดับ" style={{ fontWeight: 600, color: "var(--clr-text-secondary)" }}>{pagination.offset + i + 1}</td>
                     <td data-label="ผู้ป่วย">
                       <span className={`patient-name-badge ${pn ? "" : "patient-name-badge--empty"}`}>{pn ?? "ไม่ระบุ"}</span>
                     </td>
@@ -116,7 +129,7 @@ export default function DiseaseSection({ data }: { data: TugData }) {
                     <td data-label="การเดิน">
                       {item.stepCount === null ? (
                         // Records written before step counting existed.
-                        <span style={{ color: "var(--clr-text-secondary)" }}>—</span>
+                        <span style={{ color: "var(--clr-text-secondary)" }}>-</span>
                       ) : (
                         <span className="gait-cell">
                           <strong>{item.stepCount}</strong> ก้าว
@@ -126,11 +139,11 @@ export default function DiseaseSection({ data }: { data: TugData }) {
                         </span>
                       )}
                     </td>
-                    <td data-label="คะแนน"><span className="score-stack">{scores.length ? scores : "—"}</span></td>
+                    <td data-label="คะแนน"><span className="score-stack">{scores.length ? scores : "-"}</span></td>
                     <td data-label="เวลา">{formatIsoThai(item.timestamp)}</td>
                     <td data-label="จัดการ">
-                      <select className="assign-select" value={item.patientId} onChange={(e) => onAssign(item.id, e.target.value)}>
-                        <option value="">— เลือกผู้ป่วย —</option>
+                      <select className="assign-select" value={item.patientId} onClick={(e) => e.stopPropagation()} onChange={(e) => onAssign(item.id, e.target.value)}>
+                        <option value="">- เลือกผู้ป่วย -</option>
                         {patients.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                       </select>
                     </td>
@@ -140,7 +153,9 @@ export default function DiseaseSection({ data }: { data: TugData }) {
             )}
           </tbody>
         </table>
-      </div>
+      </DataViewport>
+      <Pagination label="ผลประเมินโรค" {...pagination} />
+      {selectedAssessment && <PatientProgressModal patient={patients.find((p) => p.id === selectedAssessment.patientId) ?? null} results={data.results.filter((r) => r.patientId === selectedAssessment.patientId)} assessments={assessments.filter((a) => a.patientId === selectedAssessment.patientId)} focusAssessment={selectedAssessment} onClose={() => setSelectedAssessment(null)} />}
     </section>
   );
 }

@@ -1,10 +1,10 @@
 // Time helpers for values written by the ESP32 boards.
 //
 // Two traps the firmware spec calls out (section 8):
-//   8.2 — the boards write epoch SECONDS, JS Date wants milliseconds.
+//   8.2 - the boards write epoch SECONDS, JS Date wants milliseconds.
 //         new Date(finished_at)        -> year 1970  ❌
 //         new Date(finished_at * 1000) -> correct    ✅
-//   8.3 — the boards call configTime(0, 0, ...) i.e. UTC. Without an explicit
+//   8.3 - the boards call configTime(0, 0, ...) i.e. UTC. Without an explicit
 //         timeZone a 15:00 test would render as 08:00.
 
 const BANGKOK = "Asia/Bangkok"; // UTC+7
@@ -30,17 +30,17 @@ export function epochToDate(sec: number | undefined | null): Date | null {
 /**
  * Full date+time in Thai locale, Bangkok time.
  * started_at can legitimately be 0 when the board began a test before NTP had
- * synced (spec section 3) — show that honestly rather than "1 ม.ค. 1970".
+ * synced (spec section 3) - show that honestly rather than "1 ม.ค. 1970".
  */
 export function formatThai(sec: number | undefined | null): string {
   const d = epochToDate(sec);
   return d ? dateTimeFmt.format(d) : "ไม่ทราบเวลา";
 }
 
-/** Time only (no date) — for compact table cells. */
+/** Time only (no date) - for compact table cells. */
 export function formatThaiTime(sec: number | undefined | null): string {
   const d = epochToDate(sec);
-  return d ? timeOnlyFmt.format(d) : "—";
+  return d ? timeOnlyFmt.format(d) : "-";
 }
 
 /**
@@ -48,8 +48,8 @@ export function formatThaiTime(sec: number | undefined | null): string {
  *
  * `gait_assessments` stores an ISO string rather than an epoch, written by two
  * different producers:
- *   • the web camera — new Date().toISOString()      → "2026-06-20T06:09:01.165Z"
- *   • main.py        — datetime.now(timezone.utc)    → "2026-05-08T08:56:00.671507+00:00"
+ *   • the web camera - new Date().toISOString()      → "2026-06-20T06:09:01.165Z"
+ *   • main.py        - datetime.now(timezone.utc)    → "2026-05-08T08:56:00.671507+00:00"
  * Both carry an explicit UTC marker, so Date parses them correctly; we only
  * have to pin the *display* zone so the reader sees Thai local time.
  */

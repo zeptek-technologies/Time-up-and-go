@@ -1,0 +1,196 @@
+/* ตั้งค่าระยะเซนเซอร์ — ใช้สี รัศมี และเส้นขอบร่วมกับ redesign.css / dashboard.css (ดู DESIGN.md) */
+.devset-intro {
+  max-width: 76ch;
+  margin: -8px 0 22px;
+  color: var(--clr-text-secondary);
+  font-size: .85rem;
+  line-height: 1.75;
+}
+.devset-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.devset-card {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+  padding: 22px;
+  border: var(--rule);
+  border-radius: var(--r-panel);
+  background: var(--clr-surface);
+}
+
+.devset-card__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.devset-card__head h3 { margin: 0; font-size: 1.05rem; line-height: 1.4; }
+.devset-card__head h3 small { margin-left: 6px; color: var(--clr-text-secondary); font-size: .75rem; font-weight: 500; }
+.devset-card__head p { margin: 4px 0 0; color: var(--clr-text-secondary); font-size: .8rem; }
+
+.devset-reading {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 160px;
+  max-width: 100%;
+  padding: 10px 14px;
+  border-radius: var(--r-field);
+  background: var(--clr-primary-50);
+  text-align: right;
+}
+.devset-reading span { color: var(--clr-text-secondary); font-size: .7rem; }
+.devset-reading strong { color: var(--clr-primary-700); font-size: 1.35rem; line-height: 1.3; font-variant-numeric: tabular-nums; }
+.devset-reading small { color: var(--clr-text-secondary); font-size: .7rem; line-height: 1.5; }
+/* ไม่ได้รับเสียงสะท้อน — ปกติเมื่อไม่มีวัตถุหน้าเซนเซอร์ จึงเป็นโทนเรียบ ไม่ใช่สีเตือน */
+.devset-reading--muted { background: #f8fafc; }
+.devset-reading--muted strong { color: var(--clr-text-secondary); font-size: 1.05rem; }
+
+/* แถบช่วงระยะ: สีบอกความหมาย เส้นดำคือระยะที่เซนเซอร์อ่านได้ล่าสุด */
+.devset-zones__track { position: relative; padding-top: 24px; }
+.devset-zones__bar { position: relative; height: 12px; overflow: hidden; border-radius: 999px; background: var(--clr-border); }
+.devset-zones__seg { position: absolute; top: 0; bottom: 0; }
+.devset-zones__seg--sit { background: var(--clr-primary-500); }
+.devset-zones__seg--gap { background: repeating-linear-gradient(135deg, #cbd5e1 0 5px, #f1f5f9 5px 10px); }
+.devset-zones__seg--stand,
+.devset-zones__seg--near { background: var(--clr-teal-500); }
+.devset-zones__seg--far { background: #cbd5e1; }
+.devset-zones__marker {
+  position: absolute;
+  top: 0;
+  bottom: -4px;
+  width: 0;
+  border-left: 2px solid var(--clr-text);
+  transform: translateX(-1px);
+}
+.devset-zones__marker > span {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translateX(-50%);
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: var(--clr-text);
+  color: #fff;
+  font-size: .66rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.devset-zones__marker--start > span { transform: none; }
+.devset-zones__marker--end > span { transform: translateX(-100%); }
+/* ค่าที่แสดงเป็นค่าเก่า (ช่วงนี้ไม่ได้รับเสียงสะท้อน) — เส้นประจาง ๆ ไม่ให้ดูเหมือนค่าสด */
+.devset-zones__marker--stale { border-left-style: dashed; opacity: .5; }
+.devset-zones__ticks {
+  position: relative;
+  height: 18px;
+  margin-top: 6px;
+  color: var(--clr-text-secondary);
+  font-size: .66rem;
+  font-variant-numeric: tabular-nums;
+}
+.devset-zones__tick { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+.devset-zones__tick--start { transform: none; }
+.devset-zones__tick--end { transform: translateX(-100%); }
+/* เกณฑ์ที่ตั้งไว้ — ตัวหนาสีน้ำเงิน ตรงรอยต่อของสีบนแถบ */
+.devset-zones__tick--th { color: var(--clr-primary-700); font-size: .74rem; font-weight: 800; }
+.devset-zones__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--clr-text-secondary);
+  font-size: .74rem;
+}
+.devset-zones__legend li { display: inline-flex; align-items: center; gap: 6px; }
+.devset-zones__swatch { position: static; display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
+
+.devset-field { display: flex; flex-direction: column; gap: 8px; }
+.devset-field label { font-size: .86rem; font-weight: 600; }
+.devset-field small { color: var(--clr-text-secondary); font-size: .72rem; line-height: 1.5; }
+.devset-field__row { display: flex; align-items: center; gap: 14px; }
+.devset-field input[type="range"] { flex: 1; min-width: 0; height: 28px; margin: 0; accent-color: var(--clr-primary-600); }
+.devset-number {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  overflow: hidden;
+  border: var(--rule);
+  border-radius: var(--r-field);
+  background: var(--clr-surface);
+}
+.devset-number:focus-within { outline: 2px solid var(--clr-primary-600); outline-offset: 2px; }
+.devset-number button {
+  width: 40px;
+  height: 42px;
+  border: 0;
+  background: var(--clr-primary-50);
+  color: var(--clr-primary-700);
+  font: inherit;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+.devset-number button:hover:not(:disabled) { background: var(--clr-primary-100); }
+.devset-number button:disabled { opacity: .4; }
+.devset-number input {
+  width: 54px;
+  height: 42px;
+  border: 0;
+  background: transparent;
+  color: var(--clr-text);
+  font: inherit;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.devset-number input:focus-visible { outline: none; }
+.devset-number input::-webkit-inner-spin-button,
+.devset-number input::-webkit-outer-spin-button { margin: 0; -webkit-appearance: none; }
+.devset-number > span { padding-right: 8px; color: var(--clr-text-secondary); font-size: .76rem; }
+
+.devset-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--r-field);
+  background: var(--clr-high-bg);
+  color: #b91c1c;
+  font-size: .8rem;
+}
+.devset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: var(--rule);
+}
+.devset-actions .btn { min-width: 124px; }
+/* ปุ่มหลักของระบบไม่มีสไตล์ disabled — ถ้าไม่จางลง ปุ่มที่ยังกดไม่ได้จะดูเหมือนกดได้ */
+.devset-actions .btn:disabled { opacity: .45; box-shadow: none; }
+.devset-link {
+  padding: 8px 4px;
+  border: 0;
+  background: none;
+  color: var(--clr-primary-700);
+  font: inherit;
+  font-size: .8rem;
+  font-weight: 600;
+}
+.devset-link:hover:not(:disabled) { text-decoration: underline; }
+.devset-link:disabled { color: var(--clr-text-secondary); opacity: .6; }
+.devset-sync { display: inline-flex; align-items: center; gap: 7px; margin: 0 0 0 auto; font-size: .78rem; line-height: 1.5; }
+.devset-sync::before { content: ""; flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.devset-sync--ok { color: #047857; }
+.devset-sync--wait { color: var(--clr-primary-700); }
+.devset-sync--warn { color: #b45309; }
+
+@media (max-width: 960px) {
+  .devset-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 480px) {
+  .devset-card { padding: 16px; }
+  .devset-reading { align-items: flex-start; width: 100%; text-align: left; }
+  .devset-field__row { flex-direction: column; align-items: stretch; gap: 10px; }
+  .devset-number { align-self: flex-start; }
+  .devset-sync { margin-left: 0; }
+}
