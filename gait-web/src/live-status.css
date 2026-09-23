@@ -429,6 +429,8 @@
   text-align: right;
 }
 .live-footer p { margin: 0; }
+.live-footer__source { margin-right: auto !important; text-align: left; }
+.live-footer__source strong { color: var(--clr-text); font-weight: 600; }
 
 @media (max-width: 760px) {
   .app-nav__external { margin-left: 2px; }
@@ -486,8 +488,18 @@
     display: block;
     padding-bottom: 10px;
   }
+  .live-footer__source { margin-bottom: 6px !important; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .live-page * { scroll-behavior: auto !important; }
+}
+
+/* เวลาที่กำลังเดิน (จากกล้อง) ใต้หัวข้อหลัก */
+.live-elapsed {
+  margin: 6px 0 0;
+  color: var(--live-accent);
+  font-size: clamp(1.4rem, 3vw, 2.2rem);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
 }

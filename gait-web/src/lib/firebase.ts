@@ -20,6 +20,8 @@ import {
 } from "firebase/firestore";
 import type { GaitSessionRecorder } from "./recorder";
 import type { ChairDistances, CheckpointDistances } from "./deviceConfig";
+import { mergeCameraTimings } from "./timingMerge";
+import { riskLevelOf } from "./tugRisk";
 
 const firebaseConfig = {
   apiKey: "AIzaSyC4dFT0u_NWRmsbuQygQhQnW6nGuRUn4D8",
@@ -92,6 +94,12 @@ export interface TugResult {
   // result. The firmware intentionally stores the patient document id in
   // subject_key and does not write patient_id.
   patientId: string;
+  /** ที่มาของเวลารวม: กล้อง (หลัก) หรือเซนเซอร์เก้าอี้ (สำรอง) — ดู lib/timingMerge.ts */
+  timingSource: "camera" | "chair";
+  /** เวลาที่กล้องวัดได้ (null = กล้องไม่ได้จับรอบนี้) */
+  cameraTotalSec: number | null;
+  /** เวลาที่เก้าอี้วัดได้ (null = ไม่มีผลจากเก้าอี้ในรอบนี้) */
+  chairTotalSec: number | null;
 }
 
 export interface GaitAssessment {
@@ -155,9 +163,12 @@ export function subscribeResults(cb: (rows: TugResult[]) => void, onError?: (e: 
   return onSnapshot(
     query(collection(db, "tug_results")),
     (snap) => {
-      const rows: TugResult[] = [];
+      const chairRows: TugResult[] = [];
+      const cameraRows: TugResult[] = [];
       snap.forEach((d) => {
         const data = d.data() as DocumentData;
+        const fromCamera = data.device === "camera";
+        const rows = fromCamera ? cameraRows : chairRows;
         const subjectKey = typeof data.subject_key === "string" ? data.subject_key : "";
         // Results created by the chair contain subject_key but no patient_id.
         // subject_key is the pseudonymous Firestore patient document id, so use
@@ -183,8 +194,12 @@ export function subscribeResults(cb: (rows: TugResult[]) => void, onError?: (e: 
           trialNo: num(data.trial_no),
           fwVersion: data.fw_version ?? "",
           patientId,
+          timingSource: fromCamera ? "camera" : "chair",
+          cameraTotalSec: fromCamera ? num(data.total_sec) : null,
+          chairTotalSec: fromCamera ? null : num(data.total_sec),
         });
       });
+      const rows = mergeCameraTimings(chairRows, cameraRows);
       // Newest first by real wall-clock time. The old sort parsed the doc ID,
       // which no longer works: v1 IDs were millis-since-boot, v2 IDs are
       // "<epoch>_<trial>" — the two aren't comparable. Rows with no timestamp
@@ -355,6 +370,118 @@ export async function requestReset(): Promise<void> {
   await ensureAuth();
   const nowSec = Math.floor(Date.now() / 1000);
   await setDoc(doc(db, "device_commands", "chair"), { reset_requested_at: nowSec }, { merge: true });
+}
+
+// ── Camera-based TUG timing ──
+// เวลาที่กล้องวัดได้ เก็บเป็นเอกสาร cam_* ใน tug_results (collection ที่กฎอนุญาตอยู่แล้ว)
+// แล้วให้ subscribeResults จับคู่กับผลของเก้าอี้ฝั่งเว็บ — ดู lib/timingMerge.ts
+export interface CameraTiming {
+  durationMs: number;
+  startedAtMs: number; // epoch ms
+  finishedAtMs: number; // epoch ms
+  sessionId: string;
+  trialNo: number; // 0 = ไม่รู้เลขรอบ (เก้าอี้ออฟไลน์) → เป็นแถวของกล้องอย่างเดียว
+  subjectKey: string;
+}
+
+export async function saveCameraTiming(t: CameraTiming): Promise<void> {
+  await ensureAuth();
+  const totalSec = t.durationMs / 1000;
+  const finishedSec = Math.floor(t.finishedAtMs / 1000);
+  await setDoc(doc(db, "tug_results", `cam_${finishedSec}_${t.trialNo || 0}`), {
+    device: "camera",
+    timing_source: "camera",
+    total_sec: totalSec,
+    checkpoint_sec: 0,
+    return_sec: 0,
+    risk_level: riskLevelOf(totalSec),
+    status: "completed",
+    started_at: Math.floor(t.startedAtMs / 1000),
+    finished_at: finishedSec,
+    started_at_ms: Math.round(t.startedAtMs),
+    finished_at_ms: Math.round(t.finishedAtMs),
+    subject_key: t.subjectKey || "unassigned",
+    session_id: t.sessionId || "unassigned",
+    trial_no: t.trialNo || 0,
+    fw_version: "web-camera-1",
+  });
+}
+
+// สถานะของตัวจับเวลาจากกล้อง ให้จอสถานะ (อีกเครื่อง) เห็นได้ทันทีที่ผู้ทดสอบลุก
+// ไม่ต้องรอเก้าอี้ ส่ง elapsed_ms (ไม่ใช่เวลาเริ่ม) เพราะนาฬิกาสองเครื่องอาจต่างกันหลายวินาที
+export type CameraPhase = "off" | "waiting" | "ready" | "running" | "cooldown";
+
+export interface CameraStatus {
+  exists: boolean;
+  phase: CameraPhase;
+  elapsedMs: number;
+  lastDurationMs: number;
+  /** เวลาพักที่เหลือก่อนรอบถัดไป (ms) ณ ตอนที่หน้ากล้องส่งมา */
+  cooldownLeftMs: number;
+}
+
+export async function publishCameraStatus(
+  phase: CameraPhase,
+  elapsedMs: number,
+  lastDurationMs: number,
+  cooldownLeftMs: number,
+): Promise<void> {
+  await ensureAuth();
+  await setDoc(
+    doc(db, "device_status", "camera"),
+    {
+      device: "camera",
+      phase,
+      elapsed_ms: Math.round(elapsedMs),
+      last_duration_ms: Math.round(lastDurationMs),
+      cooldown_left_ms: Math.round(cooldownLeftMs),
+      last_seen: Math.floor(Date.now() / 1000),
+    },
+    { merge: true },
+  );
+}
+
+// ── แหล่งจับเวลา (กล้อง / ฮาร์ดแวร์) ──
+// ค่าเดียวใช้ร่วมกันทุกเครื่อง (หน้ากล้องกับจอสถานะมักเปิดคนละเครื่อง) จึงเก็บใน Firestore
+// อยู่ใน device_commands ซึ่งกฎอนุญาตอยู่แล้ว — บอร์ดอ่านเฉพาะเอกสารของตัวเอง จึงไม่เห็นเอกสารนี้
+export type TimingSource = "camera" | "hardware";
+export const DEFAULT_TIMING_SOURCE: TimingSource = "camera";
+
+export function subscribeTimingSource(cb: (s: TimingSource) => void, onError?: (e: Error) => void) {
+  return onSnapshot(
+    doc(db, "device_commands", "settings"),
+    (snap) => {
+      const v = (snap.data() as DocumentData | undefined)?.timing_source;
+      cb(v === "hardware" || v === "camera" ? v : DEFAULT_TIMING_SOURCE);
+    },
+    (err) => onError?.(err),
+  );
+}
+
+export async function saveTimingSource(source: TimingSource): Promise<void> {
+  await ensureAuth();
+  await setDoc(
+    doc(db, "device_commands", "settings"),
+    { timing_source: source, timing_source_set_at: Math.floor(Date.now() / 1000) },
+    { merge: true },
+  );
+}
+
+export function subscribeCameraStatus(cb: (s: CameraStatus) => void, onError?: (e: Error) => void) {
+  return onSnapshot(
+    doc(db, "device_status", "camera"),
+    (snap) => {
+      const d = (snap.data() as DocumentData) ?? {};
+      cb({
+        exists: snap.exists(),
+        phase: (d.phase as CameraPhase) ?? "off",
+        elapsedMs: num(d.elapsed_ms),
+        lastDurationMs: num(d.last_duration_ms),
+        cooldownLeftMs: num(d.cooldown_left_ms),
+      });
+    },
+    (err) => onError?.(err),
+  );
 }
 
 // ── Sensor distance settings ──

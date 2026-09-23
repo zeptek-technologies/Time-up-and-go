@@ -14,7 +14,9 @@ export default function OverviewSection({ data }: { data: TugData }) {
   const { completedResults } = data;
   const count = completedResults.length;
   const avgTotal = count ? completedResults.reduce((s, r) => s + r.totalSec, 0) / count : 0;
-  const avgCp = count ? completedResults.reduce((s, r) => s + r.checkpointSec, 0) / count : 0;
+  // รอบที่มีแต่เวลาจากกล้อง (เก้าอี้ออฟไลน์) ไม่มีเวลาถึงจุดหมุนตัว — ไม่นับ ไม่งั้นค่าเฉลี่ยถูกดึงลง
+  const withCp = completedResults.filter((r) => r.checkpointSec > 0);
+  const avgCp = withCp.length ? withCp.reduce((s, r) => s + r.checkpointSec, 0) / withCp.length : 0;
 
   const latest = completedResults[0];
   const latestLevel = latest ? riskLevelOf(latest.totalSec) : null;

@@ -119,9 +119,15 @@ export default function RecordsSection({ data }: { data: TugData }) {
                     </td>
                     <td data-label="เวลาที่ทดสอบ">{formatThai(r.finishedAt)}</td>
                     <td data-label="รอบที่">{r.trialNo > 0 ? r.trialNo : "-"}</td>
-                    <td data-label="ขาไป (ถึงจุดหมุนตัว)">{r.checkpointSec.toFixed(2)} วินาที</td>
+                    <td data-label="ขาไป (ถึงจุดหมุนตัว)">{r.checkpointSec > 0 ? `${r.checkpointSec.toFixed(2)} วินาที` : "-"}</td>
                     <td data-label="กลับ">{r.returnSec > 0 ? `${r.returnSec.toFixed(2)} วินาที` : "-"}</td>
-                    <td data-label="เวลารวม"><strong>{r.totalSec.toFixed(2)} วินาที</strong></td>
+                    <td data-label="เวลารวม">
+                      <strong>{r.totalSec.toFixed(2)} วินาที</strong>
+                      <small className="timing-source">
+                        {r.timingSource === "camera" ? "จากกล้อง" : "จากเก้าอี้"}
+                        {r.cameraTotalSec != null && r.chairTotalSec != null && ` · เก้าอี้วัดได้ ${r.chairTotalSec.toFixed(2)}`}
+                      </small>
+                    </td>
                     <td data-label="ระดับความเสี่ยง">
                       {aborted ? (
                         <span className="risk-badge" title="รอบนี้ถูกยกเลิก/หมดเวลา - เวลาที่ได้ไม่ใช่ผลจริง">ยกเลิก</span>

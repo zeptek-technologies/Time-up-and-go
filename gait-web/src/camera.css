@@ -330,3 +330,28 @@
 .gc-modal__status-err { color: var(--clr-high); font-weight: 600; }
 .gc-modal__docid { color: var(--clr-primary-700); font-size: 0.78rem; word-break: break-all; }
 .gc-modal .gc-btn { margin-top: 22px; }
+
+/* การ์ดตัวจับเวลาจากกล้องด้านข้าง — สถานะ + ตัวเลขที่กำลังเดิน */
+.gc-timer {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid var(--clr-border);
+  border-radius: var(--r-field, 10px);
+  background: var(--clr-surface);
+}
+.gc-timer__label { font-size: 0.72rem; color: var(--clr-text-secondary); }
+.gc-timer__headline { font-size: 0.95rem; color: var(--clr-text); }
+.gc-timer__clock {
+  font-size: 1.9rem;
+  font-weight: 800;
+  line-height: 1.2;
+  color: var(--clr-primary-700);
+  font-variant-numeric: tabular-nums;
+}
+.gc-timer__last { font-size: 0.78rem; color: var(--clr-text-secondary); font-variant-numeric: tabular-nums; }
+.gc-timer--ready { border-color: var(--clr-teal-500); background: var(--clr-teal-50); }
+.gc-timer--ready .gc-timer__headline { color: #0f766e; }
+.gc-timer--running { border-color: var(--clr-primary-300); background: var(--clr-primary-50); }
+.gc-timer--off .gc-timer__headline { color: var(--clr-text-secondary); font-weight: 500; }
