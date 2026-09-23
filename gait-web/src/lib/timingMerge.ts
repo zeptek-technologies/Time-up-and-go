@@ -38,7 +38,9 @@ export function mergeCameraTimings(chairRows: TugResult[], cameraRows: TugResult
     match.timingSource = "camera";
     // กล้องเห็นครบรอบ แม้เก้าอี้จะยกเลิก (เช่น จุดหมุนตัวพลาดสัญญาณจนหมดเวลา) รอบนี้ก็ใช้ได้
     match.status = "completed";
-    // ขาไปมาจากเก้าอี้+จุดหมุนตัว ส่วนขากลับคิดจากเวลารวมของกล้อง ให้ไป+กลับ = รวมเสมอ
+    // ขาไป: ใช้ของเก้าอี้+จุดหมุนตัวก่อน (นาฬิกาเดียวกันทั้งรอบ) ถ้าเก้าอี้ไม่ได้วัด ใช้ที่กล้องคิดจาก
+    // เวลาที่ checkpoint เห็นคนผ่าน · ขากลับคิดจากเวลารวมของกล้อง ให้ไป+กลับ = รวมเสมอ
+    if (!(match.checkpointSec > 0) && cam.checkpointSec > 0) match.checkpointSec = cam.checkpointSec;
     if (match.checkpointSec > 0) match.returnSec = Math.max(0, cam.totalSec - match.checkpointSec);
   }
 

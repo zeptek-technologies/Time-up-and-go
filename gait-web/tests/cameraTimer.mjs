@@ -232,6 +232,51 @@ try {
     assert.equal(out[0].totalSec, 14.3);
   });
 
+  await test('ไม่มีเก้าอี้แต่กล้องคิดขาไปจาก checkpoint ได้ = ใช้ขาไปของกล้อง', () => {
+    const out = mergeCameraTimings(
+      [chairRow({ id: 'c1', totalSec: 12, checkpointSec: 0, finishedAt: 1000 })],
+      [camRow({ id: 'cam_1', totalSec: 11, checkpointSec: 5.2, finishedAt: 1001 })],
+    );
+    assert.equal(out[0].checkpointSec, 5.2);
+    assert.ok(Math.abs(out[0].returnSec - 5.8) < 1e-9);
+  });
+  await test('เก้าอี้วัดขาไปได้ = ใช้ของเก้าอี้ก่อน', () => {
+    const out = mergeCameraTimings(
+      [chairRow({ id: 'c1', totalSec: 12, checkpointSec: 5.6, finishedAt: 1000 })],
+      [camRow({ id: 'cam_1', totalSec: 11, checkpointSec: 5.2, finishedAt: 1001 })],
+    );
+    assert.equal(out[0].checkpointSec, 5.6);
+  });
+
+  // ── ขาไปจากเวลาที่ checkpoint เห็นคนผ่าน + เทียบนาฬิกา ──
+  const { ClockOffset, pickCheckpointSplit } = await server.ssrLoadModule('/src/lib/checkpointSync.ts');
+  console.log('checkpointSync');
+  await test('เลือกครั้งแรกที่อยู่ในรอบ ข้ามคนเดินผ่านก่อนเริ่ม/ติดจบ', () => {
+    const start = 1_000_000, end = start + 12_000;
+    // ก่อนเริ่ม (เจ้าหน้าที่), 0.5 วิหลังเริ่ม (เร็วเกิน), ขาไปจริง 5.3 วิ, ครั้งซ้ำตอนหมุนตัว, ติดจบ
+    const passes = [start - 4000, start + 500, start + 5300, start + 6100, end - 300];
+    assert.equal(pickCheckpointSplit(passes, start, end), 5.3);
+  });
+  await test('ไม่มีครั้งไหนอยู่ในรอบ = null (กล้องอย่างเดียว)', () => {
+    assert.equal(pickCheckpointSplit([], 0, 10_000), null);
+    assert.equal(pickCheckpointSplit([20_000], 0, 10_000), null);
+  });
+  await test('เทียบนาฬิกา: เลือกตัวอย่างที่เน็ตเร็วที่สุด', () => {
+    const c = new ClockOffset();
+    assert.equal(c.offsetMs, null);
+    // นาฬิกาเครื่องนี้ช้ากว่าเซิร์ฟเวอร์ 2 วิ · ตัวอย่างแรกเน็ตช้า (ไม่สมมาตร) ตัวที่สองเร็ว
+    c.add({ sentMs: 10_000, serverMs: 12_900, recvMs: 11_000 });
+    c.add({ sentMs: 20_000, serverMs: 22_050, recvMs: 20_100 });
+    assert.equal(c.offsetMs, 2000);
+    assert.equal(c.uncertaintyMs, 50);
+  });
+  await test('เทียบนาฬิกา: ทิ้งตัวอย่างผิดปกติ (ย้อนเวลา/ช้าเกิน)', () => {
+    const c = new ClockOffset();
+    c.add({ sentMs: 5000, serverMs: 5000, recvMs: 4000 });
+    c.add({ sentMs: 5000, serverMs: 5000, recvMs: 20_000 });
+    assert.equal(c.offsetMs, null);
+  });
+
   console.log(`\n${passed} passed${process.exitCode ? ', some FAILED' : ''}`);
 } finally {
   await server.close();

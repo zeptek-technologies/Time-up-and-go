@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import DeviceStatusChip from "./DeviceStatusChip";
 import { useDeviceStatus } from "../hooks/useDeviceStatus";
 import { useCooldownCountdown } from "../hooks/useCooldownCountdown";
@@ -147,6 +147,36 @@ function stageFrom(state: string, known: boolean, online: boolean): Stage {
   }
 }
 
+// โหมดกล้อง: checkpoint เห็นคนเดินผ่าน "ระหว่างรอบที่กล้องกำลังจับ" หรือยัง
+// เทียบด้วยเวลาที่เครื่องนี้ได้รับข้อมูล ไม่ใช่นาฬิกาของบอร์ด/หน้ากล้อง (อยู่คนละเครื่อง นาฬิกาอาจไม่ตรงกัน)
+function useCheckpointPassDuringRun(passAtMs: number, known: boolean, running: boolean): boolean {
+  const lastPassRef = useRef<number | null>(null);
+  const [passSeq, setPassSeq] = useState(0); // นับครั้งที่เห็นคนผ่านตั้งแต่เปิดหน้า
+  const [prevRunning, setPrevRunning] = useState(running);
+  const [seqAtRunStart, setSeqAtRunStart] = useState(0);
+
+  useEffect(() => {
+    if (!known) return;
+    // ค่าแรกที่ได้ตอนเปิดหน้า = ครั้งเก่า ไม่ใช่ครั้งใหม่
+    if (lastPassRef.current === null) {
+      lastPassRef.current = passAtMs;
+      return;
+    }
+    if (passAtMs && passAtMs !== lastPassRef.current) {
+      lastPassRef.current = passAtMs;
+      setPassSeq((n) => n + 1);
+    }
+  }, [passAtMs, known]);
+
+  // จดลำดับตอนรอบเริ่ม (ปรับ state ระหว่าง render ตามแนวทางของ React แทน effect)
+  if (running !== prevRunning) {
+    setPrevRunning(running);
+    if (running) setSeqAtRunStart(passSeq);
+  }
+
+  return running && passSeq > seqAtRunStart;
+}
+
 // โหมดกล้อง: ไม่ต้องรอฮาร์ดแวร์ ขั้นตอนมาจากหน้ากล้อง (liveState แปลงจากสถานะกล้องไว้แล้ว)
 function cameraStage(phase: CameraPhase, liveState: string): Stage {
   if (phase === "no_side") {
@@ -225,10 +255,17 @@ export default function LiveStatusPage() {
   const cameraFallback = timingSource === "camera" && !camera.fresh;
 
   const chairState = effectiveChairState(chair.state, checkpoint);
+  const passedCheckpoint = useCheckpointPassDuringRun(
+    checkpoint.passAtMs,
+    checkpoint.known,
+    cameraMode && camera.phase === "running",
+  );
   let liveState = chairState;
   if (cameraMode) {
-    // ขั้นตอนมาจากกล้อง - เก้าอี้บอกได้แค่ว่าผ่านจุดหมุนตัวแล้ว (ขาไป/ขากลับ)
-    if (camera.phase === "running") liveState = chairState === "RETURNING" ? "RETURNING" : "RUNNING";
+    // ขั้นตอนมาจากกล้อง - ผ่านจุดหมุนตัวรู้จาก checkpoint โดยตรง (ไม่ต้องมีเก้าอี้) หรือจากเก้าอี้
+    if (camera.phase === "running") {
+      liveState = chairState === "RETURNING" || passedCheckpoint ? "RETURNING" : "RUNNING";
+    }
     else if (camera.phase === "cooldown") liveState = "COOLDOWN";
     else if (camera.phase === "ready") liveState = "READY";
     else liveState = "WAIT_SIT";
