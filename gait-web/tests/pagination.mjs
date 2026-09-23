@@ -30,7 +30,7 @@ try {
     const { default: Component } = await server.ssrLoadModule(`/src/components/${name}.tsx`);
     const html = renderToStaticMarkup(createElement(Component, { data, activePatientId: '', setActivePatientId: () => {} }));
     assert.equal(html.split(marker).length - 1, 5, `${name}: only 5 visible records`);
-    assert.ok(html.includes(`1–5 จาก ${expectedTotal} รายการ`), `${name}: full count retained`);
+    assert.ok(html.includes(`1-5 จาก ${expectedTotal} รายการ`), `${name}: full count retained`);
     assert.ok(html.includes('data-viewport'), `${name}: bounded viewport`);
   }
   console.log('PASS: pagination boundaries, 100 patients, 100 results, 120 assessments; no omitted/duplicate records across pages.');

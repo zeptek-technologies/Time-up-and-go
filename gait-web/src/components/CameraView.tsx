@@ -10,6 +10,7 @@ import { FeatureSmoother, PredictionSmoother } from "../lib/smoothers";
 import { POSE_CONFIG, type CameraView as CameraRole } from "../lib/config";
 import { drawSkeleton } from "../lib/drawing";
 import { useCameraDevices } from "../hooks/useCameraDevices";
+import { classifyPosture, type PostureSample } from "../lib/postureDetector";
 
 export interface FrameData {
   features: GaitFeatures | null;
@@ -22,6 +23,9 @@ interface Props {
   // Called every processed frame. Keep this stable (useRef/useCallback) — it
   // runs at camera frame rate, so do not trigger React renders inside it.
   onFrame?: (data: FrameData) => void;
+  // ท่านั่ง/ยืนของทุกเฟรมที่ประมวลผล (ใช้กับตัวจับเวลาจากกล้อง) — ต้องเสถียรและเบา
+  // เหมือน onFrame เพราะถูกเรียกตามอัตราเฟรมของกล้อง
+  onPose?: (sample: PostureSample) => void;
 }
 
 type Status = "off" | "loading" | "ready" | "error";
@@ -36,15 +40,21 @@ const STATUS_TH: Record<Status, string> = {
 
 // video.requestVideoFrameCallback isn't in older TS DOM libs; type it narrowly.
 type RVFCVideo = HTMLVideoElement & {
-  requestVideoFrameCallback?: (cb: (now: number, meta: { mediaTime: number }) => void) => number;
+  requestVideoFrameCallback?: (
+    cb: (now: number, meta: { mediaTime: number; captureTime?: number }) => void,
+  ) => number;
   cancelVideoFrameCallback?: (handle: number) => void;
 };
 
-export default function CameraView({ view, label, onFrame }: Props) {
+export default function CameraView({ view, label, onFrame, onPose }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const onFrameRef = useRef(onFrame);
   onFrameRef.current = onFrame;
+  const onPoseRef = useRef(onPose);
+  useEffect(() => {
+    onPoseRef.current = onPose;
+  }, [onPose]);
 
   // Camera starts OFF by default: this component is always mounted (the whole
   // app is one long scrolling page), so auto-starting would prompt for camera
@@ -76,9 +86,20 @@ export default function CameraView({ view, label, onFrame }: Props) {
 
     let stream: MediaStream | null = null;
     let stopped = false;
+
+    function clearOverlay() {
+      const canvas = canvasRef.current;
+      const ctx = canvas?.getContext("2d");
+      if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    // ล้างเส้นเก่าทิ้งทุกครั้งที่เริ่มรอบใหม่ (เปิดกล้อง สลับกล้อง หรือโค้ดถูกโหลดใหม่ตอนพัฒนา)
+    // React ใช้ canvas ตัวเดิม ภาพโครงกระดูกของรอบก่อนจึงค้างทาบตัวคนระหว่างรอโมเดลพร้อม
+    clearOverlay();
     let rafId = 0;
     let rvfcId = 0;
     let lastTMs = -1; // media time of the last PROCESSED frame
+    let lastFreshMs = 0; // performance.now() ของผลตรวจจับสด ๆ ล่าสุด (0 = ยังไม่เคยได้)
     let lastMediaTime = -1; // for the rAF fallback's new-frame check
 
     const engine = new PoseEngine();
@@ -101,7 +122,10 @@ export default function CameraView({ view, label, onFrame }: Props) {
     // Process exactly one camera frame. tMs is the MEDIA frame time (monotonic),
     // so the feature windows, EMA dt, and vote window all track true capture
     // time rather than render time.
-    function processFrame(tMs: number) {
+    // clockMs = เวลาที่กล้องถ่ายเฟรมนี้ (ฐาน performance.now) ใช้กับตัวจับเวลา — ต่างจาก tMs
+    // (เวลาของวิดีโอ) ตรงที่ไม่ย้อนกลับเป็น 0 เมื่อสตรีมเริ่มใหม่ และไม่รวมเวลาที่รอประมวลผล
+    let lastClockMs = -Infinity;
+    function processFrame(tMs: number, clockMs: number) {
       const video = videoRef.current;
       const canvas = canvasRef.current;
       if (!video || !canvas || stopped) return;
@@ -114,7 +138,13 @@ export default function CameraView({ view, label, onFrame }: Props) {
         canvas.height = h;
       }
 
-      const { landmarks, worldLandmarks } = engine.detect(video, tMs);
+      const result = engine.detect(video, tMs);
+      // เฟรมซ้ำ/โมเดลยังไม่พร้อม — ไม่ใช่ "ไม่พบคน" จึงคงภาพโครงกระดูกเดิมไว้ ไม่ล้าง canvas
+      // (ถ้าค้างนานผิดปกติ ตัวเฝ้าระวังด้านล่างจะลบเส้นทิ้งและกู้โมเดลให้เอง)
+      if (result.skipped) return;
+      lastFreshMs = performance.now();
+
+      const { landmarks, worldLandmarks } = result;
       let features: GaitFeatures | null = landmarks ? extractor.extract(landmarks, worldLandmarks, w, h, tMs) : null;
       const dtMs = lastTMs < 0 ? 0 : tMs - lastTMs;
       features = featureSmoother.smooth(features, dtMs);
@@ -125,6 +155,54 @@ export default function CameraView({ view, label, onFrame }: Props) {
       if (ctx) drawSkeleton(ctx, landmarks, w, h, POSE_CONFIG.minVisibility, prediction.color);
 
       onFrameRef.current?.({ features, prediction });
+
+      if (onPoseRef.current) {
+        const clock = Math.max(lastClockMs + 1, clockMs); // กันนาฬิกาเฟรมเหลื่อมถอยหลัง
+        lastClockMs = clock;
+        onPoseRef.current(classifyPosture(landmarks, worldLandmarks, w, h, clock));
+      }
+    }
+
+    // ── ตัวเฝ้าระวังภาพค้าง ──
+    // โครงกระดูกที่ค้างทาบตัวคนอ่านผิดได้ง่ายกว่าไม่มีเส้นเลย จึงต้องลบทิ้งเมื่อผลตรวจจับ
+    // หยุดนิ่ง ไม่ว่าจะเพราะกล้องหยุดส่งเฟรม ลูปหยุด หรือโมเดลพัง แล้วพยายามกู้โมเดลให้เอง
+    const STALE_CLEAR_MS = 1000;
+    const STALE_RESTART_MS = 2500;
+    let restarting = false;
+    const watchdog = window.setInterval(() => {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      if (stopped || !video || !canvas || !lastFreshMs) return;
+      // แท็บถูกซ่อน/วิดีโอหยุดเอง = เบราว์เซอร์หยุดส่งเฟรมตามปกติ ไม่ใช่ระบบพัง
+      // ห้ามนับเป็นภาพค้างและห้ามกู้โมเดล ไม่งั้นสลับแท็บทีก็สร้างโมเดลใหม่ทุกครั้ง
+      if (document.hidden || video.paused || video.ended) {
+        lastFreshMs = performance.now();
+        return;
+      }
+      const idleMs = performance.now() - lastFreshMs;
+      if (idleMs > STALE_CLEAR_MS) clearOverlay();
+      if (idleMs > STALE_RESTART_MS && !restarting) {
+        restarting = true;
+        void engine.restart(`ไม่มีผลตรวจจับใหม่ ${Math.round(idleMs)} ms`).finally(() => {
+          restarting = false;
+          lastFreshMs = performance.now(); // ให้โอกาสโมเดลใหม่ก่อนจะนับรอบถัดไป
+        });
+      }
+    }, 500);
+
+    // ข้อผิดพลาดของเฟรมเดียวต้องไม่ทำให้ลูปตาย: ถ้า processFrame โยน error ออกมา
+    // ใน callback ของ requestVideoFrameCallback ตัวลูปจะไม่ลงทะเบียนรอบถัดไป
+    // การประมวลผลจะหยุดถาวรทั้งที่ภาพกล้องยังมาอยู่ — โครงกระดูกค้างแล้วหายไป
+    let frameErrorLogged = false;
+    function safeProcessFrame(tMs: number, clockMs: number) {
+      try {
+        processFrame(tMs, clockMs);
+      } catch (err) {
+        if (!frameErrorLogged) {
+          frameErrorLogged = true;
+          console.error(`[CameraView:${view}] ประมวลผลเฟรมไม่สำเร็จ`, err);
+        }
+      }
     }
 
     function startLoop() {
@@ -132,9 +210,9 @@ export default function CameraView({ view, label, onFrame }: Props) {
       if (!video) return;
       if (typeof video.requestVideoFrameCallback === "function") {
         // Preferred: fires once per actual decoded camera frame.
-        const cb = (_now: number, meta: { mediaTime: number }) => {
+        const cb = (now: number, meta: { mediaTime: number; captureTime?: number }) => {
           if (stopped) return;
-          processFrame(meta.mediaTime * 1000);
+          safeProcessFrame(meta.mediaTime * 1000, meta.captureTime ?? now);
           rvfcId = (videoRef.current as RVFCVideo).requestVideoFrameCallback!(cb);
         };
         rvfcId = video.requestVideoFrameCallback(cb);
@@ -146,7 +224,7 @@ export default function CameraView({ view, label, onFrame }: Props) {
           const v = videoRef.current;
           if (v && v.readyState >= 2 && v.currentTime !== lastMediaTime) {
             lastMediaTime = v.currentTime;
-            processFrame(v.currentTime * 1000);
+            safeProcessFrame(v.currentTime * 1000, performance.now());
           }
           rafId = requestAnimationFrame(loop);
         };
@@ -204,6 +282,8 @@ export default function CameraView({ view, label, onFrame }: Props) {
 
     return () => {
       stopped = true;
+      window.clearInterval(watchdog);
+      clearOverlay(); // ปิดกล้องแล้วต้องไม่เหลือโครงกระดูกค้างบนจอ
       cancelAnimationFrame(rafId);
       const v = videoRef.current as RVFCVideo | null;
       if (v && rvfcId && typeof v.cancelVideoFrameCallback === "function") v.cancelVideoFrameCallback(rvfcId);

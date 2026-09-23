@@ -228,7 +228,7 @@ function PatientDetail({
                   <tr key={result.id}>
                     <td data-label="วันและเวลา">{formatThai(result.finishedAt)}</td>
                     <td data-label="รอบ">{result.trialNo || "-"}</td>
-                    <td data-label="ไป">{result.checkpointSec.toFixed(2)}</td>
+                    <td data-label="ไป">{result.checkpointSec > 0 ? result.checkpointSec.toFixed(2) : "-"}</td>
                     <td data-label="กลับ">{result.returnSec > 0 ? result.returnSec.toFixed(2) : "-"}</td>
                     <td data-label="รวม"><strong>{result.totalSec.toFixed(2)} วินาที</strong></td>
                     <td data-label="ผล">

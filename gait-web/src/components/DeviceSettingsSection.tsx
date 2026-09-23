@@ -6,7 +6,9 @@
 import { useId, useState } from "react";
 import { useDeviceStatus, type DeviceView } from "../hooks/useDeviceStatus";
 import { useDeviceConfig } from "../hooks/useDeviceConfig";
-import { saveChairDistances, saveCheckpointDistances } from "../lib/firebase";
+import { useCameraStatus } from "../hooks/useCameraStatus";
+import { useTimingSource } from "../hooks/useTimingSource";
+import { saveChairDistances, saveCheckpointDistances, saveTimingSource, type TimingSource } from "../lib/firebase";
 import {
   CHAIR_DEFAULTS,
   CHECKPOINT_DEFAULTS,
@@ -27,18 +29,105 @@ export default function DeviceSettingsSection() {
       <div className="section-header">
         <div>
           <span className="section-header__eyebrow">Device settings</span>
-          <h2 className="section-header__title">ตั้งค่าระยะเซนเซอร์</h2>
+          <h2 className="section-header__title">ตั้งค่าอุปกรณ์</h2>
         </div>
       </div>
       <p className="devset-intro">
-        ปรับระยะที่อุปกรณ์ใช้ตัดสินว่าผู้ทดสอบนั่ง ลุก หรือเดินมาถึงจุดหมุนตัว ให้ผู้ทดสอบอยู่ในท่าจริงก่อน
+        เลือกตัวจับเวลา และปรับระยะที่อุปกรณ์ใช้ตัดสินว่าผู้ทดสอบนั่ง ลุก หรือเดินมาถึงจุดหมุนตัว ให้ผู้ทดสอบอยู่ในท่าจริงก่อน
         แล้วดู “ระยะที่อ่านได้ตอนนี้” ประกอบการตั้งค่า อุปกรณ์จะใช้ค่าใหม่เมื่อไม่ได้อยู่ระหว่างรอบทดสอบ
       </p>
+      <TimingSourceCard />
       <div className="devset-grid">
         <ChairCard />
         <CheckpointCard />
       </div>
     </>
+  );
+}
+
+// ─────────────────────────── แหล่งจับเวลา ───────────────────────────
+const TIMING_OPTIONS: Array<{ value: TimingSource; title: string; detail: string }> = [
+  {
+    value: "camera",
+    title: "กล้อง",
+    detail: "เริ่มเมื่อกล้องด้านข้างเห็นผู้ทดสอบลุก หยุดเมื่อนั่งลง · เซนเซอร์เก้าอี้เป็นตัวสำรอง ต้องเปิดหน้ากล้องไว้",
+  },
+  {
+    value: "hardware",
+    title: "ฮาร์ดแวร์",
+    detail: "ใช้เซนเซอร์ระยะที่เก้าอี้และจุดหมุนตัว · กล้องใช้บันทึกท่าเดินอย่างเดียว",
+  },
+];
+
+function TimingSourceCard() {
+  const { source, loaded } = useTimingSource();
+  const chair = useDeviceStatus("chair");
+  const camera = useCameraStatus();
+  const [saving, setSaving] = useState<TimingSource | null>(null);
+  const [failed, setFailed] = useState(false);
+  const name = useId();
+
+  // สลับกลางรอบ = รอบนั้นเสีย (หน้ากล้องจะยกเลิกรอบที่กล้องจับอยู่) จึงล็อกไว้ระหว่างทดสอบ
+  const testing =
+    (camera.fresh && camera.phase === "running") ||
+    (chair.online && ["RUNNING", "RETURNING"].includes(chair.state.toUpperCase()));
+  const shown = saving ?? source;
+
+  const choose = async (next: TimingSource) => {
+    if (next === source || testing || saving) return;
+    setSaving(next);
+    setFailed(false);
+    try {
+      await saveTimingSource(next);
+    } catch (err) {
+      console.error("[TimingSource]", err);
+      setFailed(true);
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const note: Sync = failed
+    ? { tone: "warn", text: "บันทึกไม่สำเร็จ ลองอีกครั้ง" }
+    : testing
+      ? { tone: "wait", text: "กำลังทดสอบอยู่ - เปลี่ยนได้หลังจบรอบ" }
+      : saving
+        ? { tone: "wait", text: "กำลังบันทึก…" }
+        : { tone: "ok", text: "มีผลตั้งแต่รอบถัดไป ทั้งหน้ากล้องและจอสถานะ · ผลรอบก่อนหน้าไม่เปลี่ยน" };
+
+  return (
+    <article className="devset-card devset-timing" aria-labelledby="devset-timing-title">
+      <header className="devset-card__head">
+        <div>
+          <h3 id="devset-timing-title">จับเวลาจาก</h3>
+          <p>เลือกว่าจะใช้อะไรเป็นตัวจับเวลาหลักของการทดสอบ</p>
+        </div>
+      </header>
+      <div className="devset-timing__options" role="radiogroup" aria-labelledby="devset-timing-title">
+        {TIMING_OPTIONS.map((opt) => (
+          <label
+            key={opt.value}
+            className={`devset-timing__option${shown === opt.value ? " is-selected" : ""}${testing ? " is-locked" : ""}`}
+          >
+            <input
+              type="radio"
+              name={name}
+              value={opt.value}
+              checked={shown === opt.value}
+              disabled={!loaded || testing || saving !== null}
+              onChange={() => void choose(opt.value)}
+            />
+            <span>
+              <strong>{opt.title}</strong>
+              <small>{opt.detail}</small>
+            </span>
+          </label>
+        ))}
+      </div>
+      <p className={`devset-sync devset-sync--${note.tone}`} role="status">
+        {note.text}
+      </p>
+    </article>
   );
 }
 

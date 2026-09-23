@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import DeviceStatusChip from "./DeviceStatusChip";
 import { useDeviceStatus } from "../hooks/useDeviceStatus";
 import { useCooldownCountdown } from "../hooks/useCooldownCountdown";
+import { useCameraStatus } from "../hooks/useCameraStatus";
+import { useTimingSource } from "../hooks/useTimingSource";
 import {
   ensureAuth,
   subscribeActiveSubject,
@@ -185,13 +187,36 @@ export default function LiveStatusPage() {
     };
   }, []);
 
-  const liveChairState = effectiveChairState(chair.state, checkpoint);
-  const stage = stageFrom(liveChairState, chair.known, chair.online);
-  const result = useMemo(
-    () => resultForCurrentTrial(results, chair.sessionId, chair.trialNo),
-    [results, chair.sessionId, chair.trialNo],
-  );
-  const risk = result ? riskLevelOf(result.totalSec) : null;
+  const camera = useCameraStatus();
+  const { source: timingSource, loaded: timingLoaded } = useTimingSource();
+  // โหมดกล้องใช้ได้จริงเมื่อหน้ากล้องเปิดอยู่และส่งสถานะมา ถ้าไม่ได้เปิด ใช้ข้อมูลเก้าอี้ไปพลางก่อน
+  // โหมดฮาร์ดแวร์ไม่เอาสถานะกล้องมาใช้เลย (หน้ากล้องก็ส่ง "off" มาอยู่แล้ว)
+  const cameraMode = timingSource === "camera" && camera.fresh;
+  const cameraFallback = timingSource === "camera" && !camera.fresh;
+
+  const chairState = effectiveChairState(chair.state, checkpoint);
+  let liveState = chairState;
+  if (cameraMode) {
+    // ขั้นตอนมาจากกล้อง - เก้าอี้บอกได้แค่ว่าผ่านจุดหมุนตัวแล้ว (ขาไป/ขากลับ)
+    if (camera.phase === "running") liveState = chairState === "RETURNING" ? "RETURNING" : "RUNNING";
+    else if (camera.phase === "cooldown") liveState = "COOLDOWN";
+    else if (camera.phase === "ready") liveState = "READY";
+    else liveState = "WAIT_SIT";
+  }
+  const cameraRunning = cameraMode && camera.phase === "running";
+  const stage = stageFrom(liveState, chair.known || cameraMode, chair.online || cameraMode);
+
+  // โหมดกล้อง: เวลาของรอบนี้คือเวลาที่หน้ากล้องส่งมา (ถึงก่อนผลใน tug_results)
+  // 0 = รอบนี้ไม่ถูกบันทึก (สั้นผิดปกติ/เกินเวลา/กล้องหลุด)
+  const cameraSec = cameraMode && camera.lastDurationMs > 0 ? camera.lastDurationMs / 1000 : null;
+  const cameraRejected = cameraMode && camera.phase === "cooldown" && camera.lastDurationMs <= 0;
+  const result = useMemo(() => {
+    if (!cameraMode) return resultForCurrentTrial(results, chair.sessionId, chair.trialNo);
+    if (cameraSec === null) return null;
+    return results.find((r) => r.cameraTotalSec != null && Math.abs(r.cameraTotalSec - cameraSec) < 0.002) ?? null;
+  }, [cameraMode, cameraSec, results, chair.sessionId, chair.trialNo]);
+  const shownSec = cameraSec ?? result?.totalSec ?? null;
+  const risk = shownSec !== null ? riskLevelOf(shownSec) : null;
   const passed = risk === "LOW";
 
   // ผลกล้องของรอบเดียวกัน + โรคประจำตัวของคนที่เจ้าหน้าที่เลือกไว้บนแดชบอร์ด
@@ -214,7 +239,9 @@ export default function LiveStatusPage() {
   );
 
   // ช่วงพักหลังจบรอบ (COOLDOWN) - บอกเจ้าหน้าที่ว่าอีกกี่วินาทีบอร์ดจะพร้อมรับรอบถัดไป
-  const nextRoundIn = useCooldownCountdown(stage.key === "complete", chair.stateSince, chair.cooldownSec);
+  const chairNextRoundIn = useCooldownCountdown(stage.key === "complete", chair.stateSince, chair.cooldownSec);
+  const nextRoundIn =
+    cameraMode && camera.phase === "cooldown" ? Math.ceil(camera.liveCooldownLeftMs / 1000) : chairNextRoundIn;
 
   return (
     <main className={`live-page live-page--${stage.key}`}>
@@ -245,6 +272,9 @@ export default function LiveStatusPage() {
         <div className="live-stage__copy">
           <p className="live-stage__eyebrow">{stage.eyebrow}</p>
           <h1>{stage.title}</h1>
+          {cameraRunning && (stage.key === "walking" || stage.key === "checkpoint") && (
+            <p className="live-elapsed">{(camera.liveElapsedMs / 1000).toFixed(1)} วินาที</p>
+          )}
           <div className="live-instruction">
             <span>ขั้นตอนต่อไป</span>
             <h2>{stage.instruction}</h2>
@@ -286,10 +316,10 @@ export default function LiveStatusPage() {
 
       {stage.key === "complete" && (
         <section
-          className={`live-result ${result ? (passed ? "live-result--pass" : "live-result--review") : "live-result--pending"}`}
+          className={`live-result ${shownSec !== null ? (passed ? "live-result--pass" : "live-result--review") : "live-result--pending"}`}
           aria-live="polite"
         >
-          {result ? (
+          {shownSec !== null ? (
             <>
               <div>
                 <span className="live-result__label">ผลตามเกณฑ์เวลา TUG</span>
@@ -297,10 +327,16 @@ export default function LiveStatusPage() {
                 <p>{RISK_LABEL[risk!]}</p>
               </div>
               <div className="live-result__time">
-                <strong>{result.totalSec.toFixed(2)}</strong>
+                <strong>{shownSec.toFixed(2)}</strong>
                 <span>วินาที</span>
               </div>
             </>
+          ) : cameraRejected ? (
+            <div>
+              <span className="live-result__label">ผลตามเกณฑ์เวลา TUG</span>
+              <h2>ไม่บันทึกรอบนี้</h2>
+              <p>กล้องจับรอบนี้ได้ไม่ครบ (สั้นผิดปกติ เกินเวลา หรือกล้องหลุด) - ให้เริ่มรอบใหม่หลังนับถอยหลัง</p>
+            </div>
           ) : (
             <div>
               <span className="live-result__label">ผลตามเกณฑ์เวลา TUG</span>
@@ -375,6 +411,12 @@ export default function LiveStatusPage() {
       )}
 
       <footer className="live-footer">
+        {timingLoaded && (
+          <p className="live-footer__source">
+            จับเวลาจาก: <strong>{timingSource === "camera" ? "กล้อง" : "ฮาร์ดแวร์ (เก้าอี้ + จุดหมุนตัว)"}</strong>
+            {cameraFallback && " · ยังไม่ได้เปิดหน้ากล้อง ใช้ข้อมูลจากฮาร์ดแวร์ชั่วคราว"}
+          </p>
+        )}
         <p>ผลนี้เป็นการคัดกรองเบื้องต้น ไม่ใช่การวินิจฉัยทางการแพทย์</p>
       </footer>
     </main>
