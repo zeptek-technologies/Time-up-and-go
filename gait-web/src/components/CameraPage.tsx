@@ -3,7 +3,15 @@ import CameraView, { type FrameData } from "./CameraView";
 import StatusPanel from "./StatusPanel";
 import SummaryModal, { type Summary } from "./SummaryModal";
 import { GaitSessionRecorder } from "../lib/recorder";
-import { publishCameraStatus, saveCameraTiming, uploadAssessment, type CameraPhase } from "../lib/firebase";
+import {
+  ensureAuth,
+  publishCameraStatus,
+  saveCameraTiming,
+  subscribeClockSamples,
+  uploadAssessment,
+  type CameraPhase,
+} from "../lib/firebase";
+import { ClockOffset, pickCheckpointSplit } from "../lib/checkpointSync";
 import { CameraTugTimer, type TimerEvent, type TimerPhase } from "../lib/cameraTugTimer";
 import type { PostureSample } from "../lib/postureDetector";
 import { useDeviceStatus } from "../hooks/useDeviceStatus";
@@ -23,6 +31,11 @@ const SIDE_LOST_MS = 3000;
 // ส่งสถานะให้จอสถานะ: ถี่ขณะจับเวลา (ตัวเลขเดิน) ห่างตอนว่าง (ประหยัดโควตาการเขียน)
 const PUBLISH_RUNNING_MS = 1000;
 const PUBLISH_IDLE_MS = 10000;
+// จบรอบแล้วยังไม่ได้เวลาผ่านจุดหมุนตัว (เน็ตของบอร์ดช้า) รอเพิ่มอีกเท่านี้ก่อนบันทึกผล
+const CHECKPOINT_LATE_MS = 4000;
+
+// เฟิร์มแวร์ checkpoint ที่ส่งเวลาคนเดินผ่านขึ้นเว็บเองได้ (โหมดกล้อง ไม่ต้องมีเก้าอี้) = รุ่น 3 ขึ้นไป
+const checkpointSendsPasses = (fw: string) => Number(/^checkpoint-(\d+)/.exec(fw)?.[1] ?? 0) >= 3;
 
 // ใครเป็นคนสั่งเริ่มบันทึกรอบนี้ — มีสิทธิ์สั่งจบเฉพาะคนที่สั่งเริ่ม ไม่งั้นกล้องกับเก้าอี้
 // จะสั่งจบซ้อนกันแล้วส่งผลวิเคราะห์ท่าเดินซ้ำสองชุด
@@ -80,6 +93,8 @@ export default function CameraPage({ activePatientId, activePatientName }: Props
   const runMetaRef = useRef<{ startedAtMs: number; sessionId: string; trialNo: number; subjectKey: string } | null>(null);
   const lastDurationRef = useRef(0);
   const lastPublishRef = useRef<{ phase: CameraPhase | ""; at: number }>({ phase: "", at: 0 });
+  // หน้านี้เคยเปิดกล้อง (หน้า/ข้าง) แล้วหรือยัง — ยังไม่เคย = ไม่ส่งสถานะกล้องเลย
+  const cameraUsedRef = useRef(false);
   const timerEventRef = useRef<(ev: TimerEvent) => void>(() => {});
   const prevChairStateRef = useRef("");
   // sideLive อ่านจากใน callback ที่ไม่ได้ re-create ตาม state จึงต้องมี ref คู่ไว้
@@ -89,6 +104,16 @@ export default function CameraPage({ activePatientId, activePatientName }: Props
   const uploadingRef = useRef(false);
 
   const chair = useDeviceStatus("chair");
+  const checkpoint = useDeviceStatus("checkpoint");
+
+  // ── ขาไป/ขากลับจากบอร์ด checkpoint (โหมดกล้อง) ──
+  // บอร์ดส่งเวลามาตรฐานของครั้งที่เห็นคนเดินผ่าน (pass_at_ms) — เทียบกับเวลาเริ่มของกล้องที่แปลง
+  // เป็นเวลาเซิร์ฟเวอร์แล้ว (clockRef) ดู lib/checkpointSync.ts
+  const clockRef = useRef(new ClockOffset());
+  const passesRef = useRef<number[]>([]);
+  const checkpointOnlineRef = useRef(false);
+  const [passSplitSec, setPassSplitSec] = useState<number | null>(null); // รอบที่กำลังจับ
+  const [lastSplitSec, setLastSplitSec] = useState<number | null>(null); // รอบล่าสุดที่บันทึกแล้ว
 
   // แหล่งจับเวลาที่เลือกในหน้าตั้งค่าอุปกรณ์ — โหมดฮาร์ดแวร์ กล้องใช้บันทึกท่าเดินอย่างเดียว
   const { source: timingSource } = useTimingSource();
@@ -144,8 +169,20 @@ export default function CameraPage({ activePatientId, activePatientName }: Props
       setTimerPhase(timer.phase);
       setElapsedMs(elapsed);
 
+      // ส่งสถานะเฉพาะหน้าที่เคยเปิดกล้องแล้วเท่านั้น — หน้าหลักทุกหน้ามีส่วนกล้องอยู่ ถ้าทุกหน้าส่ง
+      // แท็บแดชบอร์ดที่เปิดค้างไว้เบื้องหลังจะส่ง "hidden" ทับหน้ากล้องตัวจริง จอสถานะสลับไปมา
+      if (frontLive || side) cameraUsedRef.current = true;
+      if (!cameraUsedRef.current) return;
+
       // โหมดฮาร์ดแวร์ = "off" จอสถานะจะไม่เอาสถานะกล้องไปใช้
-      const phase: CameraPhase = side && cameraTimingRef.current ? timer.phase : "off";
+      // โหมดกล้อง: บอกด้วยว่าหน้านี้ถูกซ่อน/ยังไม่ได้ภาพกล้องข้าง จอสถานะจะได้บอกว่าต้องแก้อะไร
+      const phase: CameraPhase = !cameraTimingRef.current
+        ? "off"
+        : document.hidden
+          ? "hidden"
+          : side
+            ? timer.phase
+            : "no_side";
       const last = lastPublishRef.current;
       const gap = phase === "running" ? PUBLISH_RUNNING_MS : PUBLISH_IDLE_MS;
       if (phase !== last.phase || (phase !== "off" && now - last.at >= gap)) {
@@ -155,7 +192,15 @@ export default function CameraPage({ activePatientId, activePatientName }: Props
         );
       }
     }, 100);
-    return () => clearInterval(id);
+    // สลับแท็บ/ย่อหน้าต่าง: ส่งสถานะทันทีในรอบถัดไป ไม่ต้องรอรอบส่งตอนว่าง 10 วิ
+    const onVisibility = () => {
+      lastPublishRef.current = { phase: "", at: 0 };
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, []);
 
   const toggleRecording = () => {
@@ -275,6 +320,7 @@ export default function CameraPage({ activePatientId, activePatientName }: Props
             subjectKey: activePatientId || chair.subjectKey,
           };
           runMetaRef.current = meta;
+          setPassSplitSec(null);
           if (!recordingRef.current) {
             trialRef.current = { sessionId: meta.sessionId, trialNo: meta.trialNo };
             recorderRef.current.start();
@@ -296,13 +342,27 @@ export default function CameraPage({ activePatientId, activePatientName }: Props
           setLastDurationMs(ev.durationMs);
           const meta = runMetaRef.current;
           runMetaRef.current = null;
+          setPassSplitSec(null);
           if (meta) {
-            saveCameraTiming({ ...meta, durationMs: ev.durationMs, finishedAtMs: meta.startedAtMs + ev.durationMs }).catch(
-              (err) => {
+            const durationMs = ev.durationMs;
+            const finishedAtMs = meta.startedAtMs + durationMs;
+            // ขาไป = ครั้งแรกที่ checkpoint เห็นคนผ่านในรอบนี้ (ไม่มี checkpoint = 0 · ตารางผลแสดง "-")
+            const splitNow = () => {
+              const off = clockRef.current.offsetMs ?? 0;
+              return pickCheckpointSplit(passesRef.current, meta.startedAtMs + off, finishedAtMs + off);
+            };
+            const save = () => {
+              const split = splitNow();
+              setLastSplitSec(split);
+              saveCameraTiming({ ...meta, durationMs, finishedAtMs, checkpointSec: split ?? 0 }).catch((err) => {
                 console.error("[saveCameraTiming]", err);
                 setAutoNote("บันทึกเวลาจากกล้องไม่สำเร็จ - ระบบจะใช้เวลาจากเก้าอี้แทน");
-              },
-            );
+              });
+            };
+            setLastSplitSec(null);
+            // checkpoint เปิดอยู่แต่เวลาผ่านยังมาไม่ถึง (เน็ตของบอร์ดช้า) — รออีกนิดก่อนบันทึก
+            if (splitNow() === null && checkpointOnlineRef.current) window.setTimeout(save, CHECKPOINT_LATE_MS);
+            else save();
           }
           setAutoNote(`จบรอบ ${(ev.durationMs / 1000).toFixed(2)} วินาที (จากกล้อง) - กำลังส่งผล`);
           if (ownerRef.current === "camera") void finishRef.current();
@@ -314,6 +374,7 @@ export default function CameraPage({ activePatientId, activePatientName }: Props
         case "abort":
           runStartRef.current = null;
           runMetaRef.current = null;
+          setPassSplitSec(null);
           // รอบที่ไม่บันทึกเข้าช่วงพักเหมือนกัน - ล้างเวลารอบก่อน ไม่ให้จอสถานะโชว์ผลเก่าเป็นผลรอบนี้
           if (ev.type !== "cancel") {
             lastDurationRef.current = 0;
@@ -329,6 +390,41 @@ export default function CameraPage({ activePatientId, activePatientName }: Props
       }
     };
   }, [chair.online, chair.sessionId, chair.trialNo, chair.subjectKey, activePatientId]);
+
+  useEffect(() => {
+    let unsub = () => {};
+    let cancelled = false;
+    ensureAuth().then((ok) => {
+      if (!ok || cancelled) return;
+      unsub = subscribeClockSamples(
+        (sample) => clockRef.current.add(sample),
+        (err) => console.warn("[ClockSamples]", err.message),
+      );
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, []);
+
+  useEffect(() => {
+    checkpointOnlineRef.current = checkpoint.online;
+  }, [checkpoint.online]);
+
+  // ทุกครั้งที่ checkpoint เห็นคนผ่าน — จดไว้ (ไว้เลือกตอนจบรอบ) และโชว์ขาไปทันทีถ้าอยู่ในรอบที่กำลังจับ
+  useEffect(() => {
+    const passAt = checkpoint.passAtMs;
+    if (!passAt || passesRef.current.includes(passAt)) return;
+    passesRef.current = [...passesRef.current.slice(-19), passAt];
+    const meta = runMetaRef.current;
+    if (!meta) return;
+    const split = pickCheckpointSplit(
+      [passAt],
+      meta.startedAtMs + (clockRef.current.offsetMs ?? 0),
+      Date.now() + (clockRef.current.offsetMs ?? 0) + 1000,
+    );
+    if (split !== null) setPassSplitSec((cur) => cur ?? split);
+  }, [checkpoint.passAtMs]);
 
   // สลับแหล่งจับเวลา: ล้างตัวจับเวลาทุกครั้ง ถ้ากล้องกำลังจับรอบอยู่ให้ยกเลิกรอบนั้น
   // (ปกติสลับไม่ได้ระหว่างทดสอบ แต่อีกเครื่องอาจสลับได้ในจังหวะเดียวกับที่ผู้ทดสอบลุก)
@@ -416,9 +512,22 @@ export default function CameraPage({ activePatientId, activePatientName }: Props
               {sideLive && timerPhase === "running" && (
                 <span className="gc-timer__clock">{(elapsedMs / 1000).toFixed(1)} วินาที</span>
               )}
-              {lastDurationMs > 0 && timerPhase !== "running" && (
-                <span className="gc-timer__last">รอบล่าสุด {(lastDurationMs / 1000).toFixed(2)} วินาที</span>
+              {sideLive && timerPhase === "running" && passSplitSec !== null && (
+                <span className="gc-timer__last">ผ่านจุดหมุนตัวแล้ว · ขาไป {passSplitSec.toFixed(1)} วินาที</span>
               )}
+              {lastDurationMs > 0 && timerPhase !== "running" && (
+                <span className="gc-timer__last">
+                  รอบล่าสุด {(lastDurationMs / 1000).toFixed(2)} วินาที
+                  {lastSplitSec !== null && ` · ขาไป ${lastSplitSec.toFixed(1)} วิ`}
+                </span>
+              )}
+              <span className="gc-timer__last">
+                {checkpoint.online && (checkpointSendsPasses(checkpoint.fwVersion) || chair.online)
+                  ? "จุดหมุนตัว: เชื่อมต่อแล้ว - วัดขาไป/ขากลับด้วย"
+                  : checkpoint.online
+                    ? "จุดหมุนตัว: เฟิร์มแวร์รุ่นเก่า ต้องเปิดเก้าอี้ด้วยจึงวัดขาไปได้"
+                    : "จุดหมุนตัว: ไม่ได้เปิด - จับเวลารวมอย่างเดียว"}
+              </span>
             </div>
           ) : (
             <div className="gc-timer gc-timer--off" role="status">

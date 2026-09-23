@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import DeviceStatusChip from "./DeviceStatusChip";
 import { useDeviceStatus } from "../hooks/useDeviceStatus";
 import { useCooldownCountdown } from "../hooks/useCooldownCountdown";
@@ -12,6 +12,7 @@ import {
   subscribeResults,
   type ActiveSubject,
   type GaitAssessment,
+  type CameraPhase,
   type Patient,
   type TugResult,
 } from "../lib/firebase";
@@ -146,6 +147,65 @@ function stageFrom(state: string, known: boolean, online: boolean): Stage {
   }
 }
 
+// โหมดกล้อง: checkpoint เห็นคนเดินผ่าน "ระหว่างรอบที่กล้องกำลังจับ" หรือยัง
+// เทียบด้วยเวลาที่เครื่องนี้ได้รับข้อมูล ไม่ใช่นาฬิกาของบอร์ด/หน้ากล้อง (อยู่คนละเครื่อง นาฬิกาอาจไม่ตรงกัน)
+function useCheckpointPassDuringRun(passAtMs: number, known: boolean, running: boolean): boolean {
+  const lastPassRef = useRef<number | null>(null);
+  const [passSeq, setPassSeq] = useState(0); // นับครั้งที่เห็นคนผ่านตั้งแต่เปิดหน้า
+  const [prevRunning, setPrevRunning] = useState(running);
+  const [seqAtRunStart, setSeqAtRunStart] = useState(0);
+
+  useEffect(() => {
+    if (!known) return;
+    // ค่าแรกที่ได้ตอนเปิดหน้า = ครั้งเก่า ไม่ใช่ครั้งใหม่
+    if (lastPassRef.current === null) {
+      lastPassRef.current = passAtMs;
+      return;
+    }
+    if (passAtMs && passAtMs !== lastPassRef.current) {
+      lastPassRef.current = passAtMs;
+      setPassSeq((n) => n + 1);
+    }
+  }, [passAtMs, known]);
+
+  // จดลำดับตอนรอบเริ่ม (ปรับ state ระหว่าง render ตามแนวทางของ React แทน effect)
+  if (running !== prevRunning) {
+    setPrevRunning(running);
+    if (running) setSeqAtRunStart(passSeq);
+  }
+
+  return running && passSeq > seqAtRunStart;
+}
+
+// โหมดกล้อง: ไม่ต้องรอฮาร์ดแวร์ ขั้นตอนมาจากหน้ากล้อง (liveState แปลงจากสถานะกล้องไว้แล้ว)
+function cameraStage(phase: CameraPhase, liveState: string): Stage {
+  if (phase === "no_side") {
+    return {
+      key: "preparing",
+      step: -1,
+      eyebrow: "เตรียมกล้อง",
+      title: "รอภาพจากกล้องด้านข้าง",
+      instruction: "เปิดกล้องด้านข้างในหน้ากล้อง",
+      detail: "ตั้งกล้องด้านข้างให้เห็นเก้าอี้และตัวผู้ทดสอบเต็มตัว ระบบจับเวลาจากกล้องด้านข้างเท่านั้น",
+    };
+  }
+  if (phase === "hidden") {
+    return {
+      key: "preparing",
+      step: -1,
+      eyebrow: "กล้องหยุดทำงานชั่วคราว",
+      title: "หน้ากล้องถูกซ่อนอยู่",
+      instruction: "เปิดหน้ากล้องค้างไว้บนจอ",
+      detail: "เบราว์เซอร์หยุดประมวลผลภาพเมื่อสลับแท็บหรือย่อหน้าต่าง ให้เปิดจอสถานะนี้ในหน้าต่างแยก หรือบนอีกเครื่อง",
+    };
+  }
+  const stage = stageFrom(liveState, true, true);
+  if (stage.key === "waiting") {
+    return { ...stage, detail: "นั่งบนเก้าอี้ให้กล้องด้านข้างเห็นเต็มตัว ระบบจะขึ้นว่า “พร้อม” เมื่อนั่งนิ่ง 1 วินาที" };
+  }
+  return stage;
+}
+
 export default function LiveStatusPage() {
   const chair = useDeviceStatus("chair");
   const checkpoint = useDeviceStatus("checkpoint");
@@ -195,16 +255,23 @@ export default function LiveStatusPage() {
   const cameraFallback = timingSource === "camera" && !camera.fresh;
 
   const chairState = effectiveChairState(chair.state, checkpoint);
+  const passedCheckpoint = useCheckpointPassDuringRun(
+    checkpoint.passAtMs,
+    checkpoint.known,
+    cameraMode && camera.phase === "running",
+  );
   let liveState = chairState;
   if (cameraMode) {
-    // ขั้นตอนมาจากกล้อง - เก้าอี้บอกได้แค่ว่าผ่านจุดหมุนตัวแล้ว (ขาไป/ขากลับ)
-    if (camera.phase === "running") liveState = chairState === "RETURNING" ? "RETURNING" : "RUNNING";
+    // ขั้นตอนมาจากกล้อง - ผ่านจุดหมุนตัวรู้จาก checkpoint โดยตรง (ไม่ต้องมีเก้าอี้) หรือจากเก้าอี้
+    if (camera.phase === "running") {
+      liveState = chairState === "RETURNING" || passedCheckpoint ? "RETURNING" : "RUNNING";
+    }
     else if (camera.phase === "cooldown") liveState = "COOLDOWN";
     else if (camera.phase === "ready") liveState = "READY";
     else liveState = "WAIT_SIT";
   }
   const cameraRunning = cameraMode && camera.phase === "running";
-  const stage = stageFrom(liveState, chair.known || cameraMode, chair.online || cameraMode);
+  const stage = cameraMode ? cameraStage(camera.phase, liveState) : stageFrom(liveState, chair.known, chair.online);
 
   // โหมดกล้อง: เวลาของรอบนี้คือเวลาที่หน้ากล้องส่งมา (ถึงก่อนผลใน tug_results)
   // 0 = รอบนี้ไม่ถูกบันทึก (สั้นผิดปกติ/เกินเวลา/กล้องหลุด)
@@ -260,6 +327,7 @@ export default function LiveStatusPage() {
             ตรงกันทั้งสองหน้า - รวมถึงสถานะ "กำลังทดสอบ" ของจุดหมุนตัว ที่หน้านี้เคย
             แสดงเป็น "ไม่เชื่อมต่อ" ทั้งที่เป็นพฤติกรรมปกติของบอร์ดระหว่างจับเวลา */}
         <div className="live-links" aria-label="สถานะการเชื่อมต่อ">
+          {timingLoaded && timingSource === "camera" && <CameraChip fresh={camera.fresh} phase={camera.phase} />}
           <DeviceStatusChip deviceId="chair" />
           <DeviceStatusChip deviceId="checkpoint" />
         </div>
@@ -420,5 +488,30 @@ export default function LiveStatusPage() {
         <p>ผลนี้เป็นการคัดกรองเบื้องต้น ไม่ใช่การวินิจฉัยทางการแพทย์</p>
       </footer>
     </main>
+  );
+}
+
+// ชิปกล้องบนหัวจอ ใช้หน้าตาเดียวกับชิปอุปกรณ์ - แสดงเฉพาะโหมดจับเวลาจากกล้อง
+function CameraChip({ fresh, phase }: { fresh: boolean; phase: CameraPhase }) {
+  const cls = !fresh ? "offline" : phase === "no_side" || phase === "hidden" ? "warn" : "online";
+  const state = !fresh
+    ? "ยังไม่ได้เปิด"
+    : phase === "no_side"
+      ? "ยังไม่ได้ภาพ"
+      : phase === "hidden"
+        ? "ถูกซ่อนอยู่"
+        : "พร้อมจับเวลา";
+  return (
+    <div className={`device-chip device-chip--${cls}`} aria-label={`กล้อง: ${state}`}>
+      <span className="device-chip__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 8a2 2 0 0 1 2-2h2l1.5-2h5L16 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/><circle cx="12" cy="12.5" r="3.5"/></svg>
+      </span>
+      <span className="device-chip__body">
+        <span className="device-chip__label">กล้อง</span>
+        <span className="device-chip__state"><span className="device-chip__dot" />{state}</span>
+      </span>
+      {/* หัวจอนี้ซ่อนข้อความสถานะของชิป โชว์แค่จุดสี - ใส่ซ้ำในช่องเดียวกับ "…ที่แล้ว" ของอุปกรณ์ */}
+      <span className="device-chip__ago">{state}</span>
+    </div>
   );
 }

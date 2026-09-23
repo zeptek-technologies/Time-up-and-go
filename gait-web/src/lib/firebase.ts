@@ -21,6 +21,7 @@ import {
 import type { GaitSessionRecorder } from "./recorder";
 import type { ChairDistances, CheckpointDistances } from "./deviceConfig";
 import { mergeCameraTimings } from "./timingMerge";
+import type { ClockSample } from "./checkpointSync";
 import { riskLevelOf } from "./tugRisk";
 
 const firebaseConfig = {
@@ -290,6 +291,10 @@ export interface DeviceStatus {
   stateSince: number;
   /** chair: ความยาวช่วงพักหลังจบรอบ (วินาที) · 0 = ไม่รายงาน */
   cooldownSec: number;
+  /** checkpoint: เวลามาตรฐาน (epoch ms) ของครั้งล่าสุดที่เห็นคนเดินผ่าน · 0 = ยังไม่เคย/เฟิร์มแวร์เก่า */
+  passAtMs: number;
+  /** checkpoint: กำลังเฝ้าตลอด (โหมดกล้อง / ไม่มีเก้าอี้) */
+  freeRun: boolean;
 }
 
 export const EMPTY_DEVICE: DeviceStatus = {
@@ -298,6 +303,7 @@ export const EMPTY_DEVICE: DeviceStatus = {
   subjectKey: "", sessionId: "", trialNo: 0, chairOnline: false,
   light: "", chairState: "",
   cfgSitCm: 0, cfgStandCm: 0, cfgDetectCm: 0, distanceCm: null, distanceLive: false, stateSince: 0, cooldownSec: 0,
+  passAtMs: 0, freeRun: false,
 };
 
 export function subscribeDeviceStatus(
@@ -336,6 +342,8 @@ export function subscribeDeviceStatus(
         distanceLive: d.distance_live !== false,
         stateSince: num(d.state_since),
         cooldownSec: num(d.cooldown_sec),
+        passAtMs: num(d.pass_at_ms),
+        freeRun: d.free_run === true,
       });
     },
     (err) => onError?.(err),
@@ -382,18 +390,21 @@ export interface CameraTiming {
   sessionId: string;
   trialNo: number; // 0 = ไม่รู้เลขรอบ (เก้าอี้ออฟไลน์) → เป็นแถวของกล้องอย่างเดียว
   subjectKey: string;
+  /** ขาไปจากบอร์ด checkpoint (วินาที) · 0 = ไม่มี (ไม่ได้เปิด checkpoint / ไม่เห็นคนผ่าน) */
+  checkpointSec: number;
 }
 
 export async function saveCameraTiming(t: CameraTiming): Promise<void> {
   await ensureAuth();
   const totalSec = t.durationMs / 1000;
+  const checkpointSec = t.checkpointSec > 0 && t.checkpointSec < totalSec ? t.checkpointSec : 0;
   const finishedSec = Math.floor(t.finishedAtMs / 1000);
   await setDoc(doc(db, "tug_results", `cam_${finishedSec}_${t.trialNo || 0}`), {
     device: "camera",
     timing_source: "camera",
     total_sec: totalSec,
-    checkpoint_sec: 0,
-    return_sec: 0,
+    checkpoint_sec: checkpointSec,
+    return_sec: checkpointSec > 0 ? totalSec - checkpointSec : 0,
     risk_level: riskLevelOf(totalSec),
     status: "completed",
     started_at: Math.floor(t.startedAtMs / 1000),
@@ -403,13 +414,15 @@ export async function saveCameraTiming(t: CameraTiming): Promise<void> {
     subject_key: t.subjectKey || "unassigned",
     session_id: t.sessionId || "unassigned",
     trial_no: t.trialNo || 0,
-    fw_version: "web-camera-1",
+    fw_version: "web-camera-2",
   });
 }
 
 // สถานะของตัวจับเวลาจากกล้อง ให้จอสถานะ (อีกเครื่อง) เห็นได้ทันทีที่ผู้ทดสอบลุก
 // ไม่ต้องรอเก้าอี้ ส่ง elapsed_ms (ไม่ใช่เวลาเริ่ม) เพราะนาฬิกาสองเครื่องอาจต่างกันหลายวินาที
-export type CameraPhase = "off" | "waiting" | "ready" | "running" | "cooldown";
+// off = โหมดฮาร์ดแวร์ · no_side = เปิดหน้ากล้องแล้วแต่ยังไม่ได้ภาพจากกล้องด้านข้าง
+// hidden = หน้ากล้องถูกซ่อน (สลับแท็บ/ย่อหน้าต่าง) เบราว์เซอร์หยุดประมวลผลภาพ จับเวลาไม่ได้
+export type CameraPhase = "off" | "no_side" | "hidden" | "waiting" | "ready" | "running" | "cooldown";
 
 export interface CameraStatus {
   exists: boolean;
@@ -418,7 +431,14 @@ export interface CameraStatus {
   lastDurationMs: number;
   /** เวลาพักที่เหลือก่อนรอบถัดไป (ms) ณ ตอนที่หน้ากล้องส่งมา */
   cooldownLeftMs: number;
+  /** หน้ากล้องที่ส่งค่านี้ ("" = เวอร์ชันเก่าที่ยังไม่ระบุ) — เปิดกล้องได้หลายหน้า/หลายเครื่อง */
+  clientId: string;
+  /** Date.now() ของหน้าที่เขียน — หน้ารุ่นใหม่เปลี่ยนทุกครั้ง ค่าซ้ำ = หน้ารุ่นเก่าเขียนทับ (id ค้างจากคนก่อน) */
+  clientMs: number;
 }
+
+/** ระบุหน้ากล้องแต่ละหน้า — ตัวอย่างเทียบนาฬิกาต้องเป็นของหน้านี้เองเท่านั้น */
+export const CAMERA_CLIENT_ID = Math.random().toString(36).slice(2, 10);
 
 export async function publishCameraStatus(
   phase: CameraPhase,
@@ -436,8 +456,32 @@ export async function publishCameraStatus(
       last_duration_ms: Math.round(lastDurationMs),
       cooldown_left_ms: Math.round(cooldownLeftMs),
       last_seen: Math.floor(Date.now() / 1000),
+      // เทียบนาฬิกาเครื่องนี้กับเซิร์ฟเวอร์ (ดู lib/checkpointSync.ts) — ใช้คิดขาไปกับเวลาของ checkpoint
+      client_id: CAMERA_CLIENT_ID,
+      client_ms: Date.now(),
+      server_ts: serverTimestamp(),
     },
     { merge: true },
+  );
+}
+
+/** ตัวอย่างเทียบนาฬิกาจากการส่งสถานะของหน้ากล้องหน้านี้ (ได้ทุกครั้งที่เซิร์ฟเวอร์ยืนยันการเขียน) */
+export function subscribeClockSamples(cb: (s: ClockSample) => void, onError?: (e: Error) => void) {
+  let lastClientMs = 0;
+  return onSnapshot(
+    doc(db, "device_status", "camera"),
+    { includeMetadataChanges: true },
+    (snap) => {
+      if (snap.metadata.hasPendingWrites || snap.metadata.fromCache) return;
+      const d = snap.data() as DocumentData | undefined;
+      const ts = d?.server_ts;
+      if (!d || d.client_id !== CAMERA_CLIENT_ID || !ts?.toMillis) return;
+      const sentMs = num(d.client_ms);
+      if (sentMs === lastClientMs) return; // ยืนยันของการเขียนเดิม มาซ้ำจาก metadata
+      lastClientMs = sentMs;
+      cb({ sentMs, serverMs: ts.toMillis(), recvMs: Date.now() });
+    },
+    (err) => onError?.(err),
   );
 }
 
@@ -478,6 +522,8 @@ export function subscribeCameraStatus(cb: (s: CameraStatus) => void, onError?: (
         elapsedMs: num(d.elapsed_ms),
         lastDurationMs: num(d.last_duration_ms),
         cooldownLeftMs: num(d.cooldown_left_ms),
+        clientId: typeof d.client_id === "string" ? d.client_id : "",
+        clientMs: num(d.client_ms),
       });
     },
     (err) => onError?.(err),
