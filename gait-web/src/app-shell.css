@@ -152,6 +152,13 @@
 .device-chip--offline .device-chip__dot {
   background: var(--clr-high);
 }
+/* ต้องมีคนแก้ แต่ไม่ได้ออฟไลน์ (เช่น หน้ากล้องเปิดอยู่แต่ยังไม่ได้ภาพ) */
+.device-chip--warn {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #b45309;
+}
+.device-chip--warn .device-chip__dot { background: #f59e0b; }
 .device-chip__ago {
   font-weight: 500;
   opacity: 0.8;

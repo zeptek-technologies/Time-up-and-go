@@ -145,7 +145,14 @@ export default function CameraPage({ activePatientId, activePatientName }: Props
       setElapsedMs(elapsed);
 
       // โหมดฮาร์ดแวร์ = "off" จอสถานะจะไม่เอาสถานะกล้องไปใช้
-      const phase: CameraPhase = side && cameraTimingRef.current ? timer.phase : "off";
+      // โหมดกล้องส่งสถานะเสมอเมื่อเปิดหน้านี้ไว้ จอสถานะจะได้บอกว่าต้องแก้อะไร แทนการไปรอฮาร์ดแวร์
+      const phase: CameraPhase = !cameraTimingRef.current
+        ? "off"
+        : document.hidden
+          ? "hidden"
+          : side
+            ? timer.phase
+            : "no_side";
       const last = lastPublishRef.current;
       const gap = phase === "running" ? PUBLISH_RUNNING_MS : PUBLISH_IDLE_MS;
       if (phase !== last.phase || (phase !== "off" && now - last.at >= gap)) {
@@ -155,7 +162,15 @@ export default function CameraPage({ activePatientId, activePatientName }: Props
         );
       }
     }, 100);
-    return () => clearInterval(id);
+    // สลับแท็บ/ย่อหน้าต่าง: ส่งสถานะทันทีในรอบถัดไป ไม่ต้องรอรอบส่งตอนว่าง 10 วิ
+    const onVisibility = () => {
+      lastPublishRef.current = { phase: "", at: 0 };
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, []);
 
   const toggleRecording = () => {

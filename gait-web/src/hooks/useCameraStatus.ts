@@ -8,6 +8,8 @@ import { ensureAuth, subscribeCameraStatus, type CameraStatus } from "../lib/fir
 
 /** ไม่ได้รับข้อมูลใหม่นานเกินนี้ = หน้ากล้องปิดไปแล้ว (ยาวกว่ารอบส่งตอนว่าง 10 วิ) */
 const STALE_MS = 20000;
+/** หน้ากล้องที่ถูกซ่อนนานเกิน 5 นาที เบราว์เซอร์จะให้ส่งได้แค่นาทีละครั้ง */
+const STALE_HIDDEN_MS = 90000;
 
 export interface CameraStatusView extends CameraStatus {
   fresh: boolean;
@@ -46,7 +48,8 @@ export function useCameraStatus(): CameraStatusView {
 
   const { status, receivedAt } = latest;
   const age = receivedAt ? Math.max(0, now - receivedAt) : Infinity;
-  const fresh = status.exists && status.phase !== "off" && age < STALE_MS;
+  const fresh =
+    status.exists && status.phase !== "off" && age < (status.phase === "hidden" ? STALE_HIDDEN_MS : STALE_MS);
   const liveElapsedMs = fresh && status.phase === "running" ? status.elapsedMs + age : 0;
   const liveCooldownLeftMs = fresh && status.phase === "cooldown" ? Math.max(0, status.cooldownLeftMs - age) : 0;
   return { ...status, fresh, liveElapsedMs, liveCooldownLeftMs };

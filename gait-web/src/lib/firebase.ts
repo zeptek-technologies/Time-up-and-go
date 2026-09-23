@@ -409,7 +409,9 @@ export async function saveCameraTiming(t: CameraTiming): Promise<void> {
 
 // สถานะของตัวจับเวลาจากกล้อง ให้จอสถานะ (อีกเครื่อง) เห็นได้ทันทีที่ผู้ทดสอบลุก
 // ไม่ต้องรอเก้าอี้ ส่ง elapsed_ms (ไม่ใช่เวลาเริ่ม) เพราะนาฬิกาสองเครื่องอาจต่างกันหลายวินาที
-export type CameraPhase = "off" | "waiting" | "ready" | "running" | "cooldown";
+// off = โหมดฮาร์ดแวร์ · no_side = เปิดหน้ากล้องแล้วแต่ยังไม่ได้ภาพจากกล้องด้านข้าง
+// hidden = หน้ากล้องถูกซ่อน (สลับแท็บ/ย่อหน้าต่าง) เบราว์เซอร์หยุดประมวลผลภาพ จับเวลาไม่ได้
+export type CameraPhase = "off" | "no_side" | "hidden" | "waiting" | "ready" | "running" | "cooldown";
 
 export interface CameraStatus {
   exists: boolean;
