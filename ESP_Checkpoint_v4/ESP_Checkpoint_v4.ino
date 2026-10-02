@@ -15,8 +15,8 @@
 //       ขาวค้าง        = ผ่านจุดหมุนตัว    เขียว/เหลือง/แดงค้าง = ผล LOW/MODERATE/HIGH
 //     (ดูตารางเต็มที่หัวข้อ "RGB LED + ไฟสถานะ")
 //   • ขั้นตอนที่เก้าอี้เห็น (นั่ง/ลุก/จบรอบ) ส่งมาทาง ESP-NOW ใน field chairState
-//   • ไม่มีหน้าตั้งค่า WiFi ของตัวเอง — ขอ SSID/รหัสจากบอร์ดเก้าอี้ผ่าน ESP-NOW
-//     เจ้าหน้าที่จึงตั้งค่า WiFi ที่เดียวคือที่ AP "TUG Setup" ของบอร์ดเก้าอี้
+//   • ตั้งค่า WiFi ได้สองทาง: ① ที่บอร์ดเก้าอี้ (TUG-Chair-Setup) แล้วบอร์ดนี้ขอค่ามาเองทาง ESP-NOW
+//     ② ที่ AP ของบอร์ดนี้เอง (TUG-Checkpoint-Setup) — กระจายตลอดเหมือนเก้าอี้ ใช้ตอนไม่มีเก้าอี้
 //   • รายงานสถานะตัวเองขึ้น Firestore ให้เว็บเห็น (device_status/checkpoint)
 //   • รับคำสั่งรีเซ็ตจากเว็บได้เอง (device_commands/checkpoint)
 //
@@ -33,8 +33,7 @@
 #include <Firebase_ESP_Client.h>
 #include "addons/TokenHelper.h"
 
-// ปกติรับ WiFi มาจากบอร์ดเก้าอี้ทาง ESP-NOW — แต่โหมดกล้องใช้ได้โดยไม่มีเก้าอี้ จึงเก็บหน้าตั้งค่าไว้
-// ให้ AP สำรอง (ไม่มีเก้าอี้ส่งค่าให้ = ต้องตั้งเองที่ AP นี้) · แฟลชด้วย PartitionScheme=huge_app
+// มีหน้าตั้งค่า WiFi ของตัวเอง (โหมดกล้องใช้ได้โดยไม่มีเก้าอี้) · แฟลชด้วย PartitionScheme=huge_app
 #include "TUGWiFiPortal.h"
 
 #define FW_VERSION "checkpoint-3.0.0"
@@ -44,11 +43,10 @@
 //     ใช้ค่าเดียวกับที่ตั้งไว้ใน ESP_Chair_v2.ino
 // ============================================================
 
-// --- AP สำรอง (ปกติไม่เปิด) ---
-// บอร์ดนี้รับ WiFi จากบอร์ดเก้าอี้ทาง ESP-NOW จึงไม่กระจาย SSID ของตัวเอง
-// ชื่อนี้จะโผล่ก็ต่อเมื่อไม่มี WiFi นาน 90 วิ (ไม่มีเก้าอี้ / WiFi ที่จำไว้ไม่อยู่แถวนี้)
+// --- AP ตั้งค่า WiFi (กระจายตลอด เหมือน TUG-Chair-Setup ของบอร์ดเก้าอี้) ---
 // ต่อ AP นี้แล้วหน้าตั้งค่าจะเด้งขึ้นมา เลือก WiFi ได้เหมือนที่บอร์ดเก้าอี้
-#define AP_SSID       "TUG-Checkpoint-Recovery"
+// ถ้ามีเก้าอี้ ตั้งที่เก้าอี้ที่เดียวก็พอ บอร์ดนี้จะขอค่ามาเองทาง ESP-NOW
+#define AP_SSID       "TUG-Checkpoint-Setup"
 #define AP_PASSWORD   "tugsetup123"
 
 // --- Firebase (Cloud Firestore) ---
@@ -171,7 +169,7 @@ typedef struct struct_message {
 } struct_message;
 
 // ---------- รับ WiFi จากบอร์ดเก้าอี้ (ต้องเหมือน ESP_Chair เป๊ะ) ----------
-// บอร์ดนี้ไม่กระจาย SSID ตั้งค่าเอง แต่ยิง "NEED_WIFI" ไล่ไปทีละช่องจนเจอเก้าอี้
+// ยังไม่มี WiFi → ยิง "NEED_WIFI" ไล่ไปทีละช่องจนเจอเก้าอี้
 // แล้วรับ ssid/password กลับมาต่อ — เจ้าหน้าที่จึงใส่รหัส WiFi ที่เดียวคือที่เก้าอี้
 //
 // magic บอกประเภทค่า:
@@ -194,7 +192,10 @@ typedef struct struct_wifi_config {
 #define PROVISION_CHANNEL_MAX   13     // ช่องที่ใช้ได้ในไทย (2.4GHz)
 #define PROVISION_DWELL_MS      300    // อยู่ช่องละเท่าไร — วนครบ 13 ช่อง ≈ 3.9 วิ
 #define PROVISION_RETRY_MS      45000  // ได้ค่ามาแล้วต่อไม่ติด นานเท่านี้ค่อยไล่หาใหม่
-#define RECOVERY_AP_AFTER_MS    90000  // 90 วิแล้วยังไม่ได้ WiFi → เปิด AP ให้ตั้งค่าเอง (โหมดกล้องอาจไม่มีเก้าอี้)
+// ไล่ครบทุกช่องแล้ว หยุดพักที่ช่องของ AP ตั้งค่า (ช่อง 1) สักพัก — AP ย้ายช่องตามวิทยุ
+// ถ้าไล่ไม่หยุด มือถือจะต่อ TUG-Checkpoint-Setup ไม่ค่อยติด (เจอ AP ช่องหนึ่ง พอจะต่อ AP ย้ายไปแล้ว)
+#define PROVISION_PARK_MS       6000
+#define PROVISION_PARK_CH       1
 
 // ---------- สถานะของ Chair (ต้องตรงกับ enum SystemState ฝั่ง ESP_Chair เป๊ะ) ----------
 // ⚠️ ค่าตัวเลขวิ่งข้าม ESP-NOW ห้ามสลับลำดับหรือแทรกค่าใหม่ตรงกลางฝั่งเดียว
@@ -349,7 +350,7 @@ uint8_t       provisionChannel = PROVISION_CHANNEL_MIN;
 unsigned long lastHopTime      = 0;
 unsigned long lastApplyTime    = 0;   // เวลาที่เพิ่งเอาค่าที่ได้ไปลองต่อ
 unsigned long lastOnlineMs     = 0;   // ครั้งสุดท้ายที่ WiFi ยังต่ออยู่จริง
-bool          recoveryApOn     = false;
+unsigned long provisionParkUntil = 0;
 
 // ---------- ประกาศฟังก์ชันล่วงหน้า ----------
 // ปกติ Arduino สร้างให้เอง (ctags) แต่ประกาศไว้เองด้วย ไฟล์นี้จึง build ได้แม้เครื่องที่ ctags ใช้ไม่ได้
@@ -1051,7 +1052,7 @@ bool needsProvisioning() {
   if (currentState == CP_DETECTING)                  return false;
   // เปิด AP กู้ภัยแล้วก็ยังไล่หาต่อ — ไม่งั้นถ้าแฟลชบอร์ดนี้ก่อนแล้วค่อยไปตั้งค่าเก้าอี้
   // ทีหลัง มันจะเลิกหาถาวรจนกว่าจะรีบูต หยุดเฉพาะตอนมีคนต่อเข้า AP มาตั้งค่าจริง ๆ
-  if (recoveryApOn && WiFi.softAPgetStationNum() > 0) return false;
+  if (WiFi.softAPgetStationNum() > 0)                return false;
   if (lastApplyTime && millis() - lastApplyTime < PROVISION_RETRY_MS) return false;
   if (portal.hasSaved() && millis() - lastOnlineMs < WIFI_STALE_MS)   return false;
   return true;
@@ -1062,6 +1063,7 @@ bool needsProvisioning() {
 void tickProvisioning() {
   if (!needsProvisioning()) return;
   unsigned long now = millis();
+  if ((long)(provisionParkUntil - now) > 0) return;   // พักให้มือถือต่อ AP ตั้งค่าได้
   if (now - lastHopTime < PROVISION_DWELL_MS) return;
   lastHopTime = now;
 
@@ -1070,7 +1072,11 @@ void tickProvisioning() {
 
   if (provisionChannel == PROVISION_CHANNEL_MAX) {
     provisionChannel = PROVISION_CHANNEL_MIN;
-    Serial.println("  [Provision] ยังไม่เจอบอร์ดเก้าอี้ — วนไล่ช่องใหม่อีกรอบ");
+    // พักที่ช่องของ AP ตั้งค่า — ระหว่างนี้ยังเคาะถามเก้าอี้ที่ช่องนี้ได้ (เก้าอี้ที่ยังไม่มี WiFi ก็อยู่ช่อง 1)
+    esp_wifi_set_channel(PROVISION_PARK_CH, WIFI_SECOND_CHAN_NONE);
+    sendCommand("NEED_WIFI", 0.0);
+    provisionParkUntil = now + PROVISION_PARK_MS;
+    Serial.println("  [Provision] ยังไม่เจอบอร์ดเก้าอี้ — ตั้งค่าเองได้ที่ WiFi " AP_SSID " หรือรอไล่หาเก้าอี้รอบใหม่");
   } else {
     provisionChannel++;
   }
@@ -1239,10 +1245,9 @@ void setup() {
   //    เปิด SoftAP ค้างไว้ตลอด + ต่อ WiFi ที่จำไว้ให้อัตโนมัติ
   //    เปลี่ยน WiFi ได้จากหน้าเว็บ ไม่ต้องอัปโหลดโค้ดใหม่
   // ----------------------------------------------------------
-  // startAp = false → บอร์ดนี้ไม่กระจาย SSID ตั้งค่า มีแต่บอร์ดเก้าอี้ที่กระจาย
-  // (AP จะถูกเปิดให้อัตโนมัติภายหลัง ถ้ารับค่าจากเก้าอี้ไม่สำเร็จภายใน 3 นาที)
+  // startAp = true → กระจาย TUG-Checkpoint-Setup ตลอด เหมือนบอร์ดเก้าอี้ (ตั้งค่าได้แม้ไม่มีเก้าอี้)
   loadDetectConfig();   // ค่าระยะตรวจจับที่ตั้งจากเว็บไว้ครั้งล่าสุด
-  portal.begin(AP_SSID, AP_PASSWORD, "TUG Checkpoint (จุดหมุนตัว 3 ม.)", false);
+  portal.begin(AP_SSID, AP_PASSWORD, "TUG Checkpoint (จุดหมุนตัว 3 ม.)", true);
 
   Serial.print("  [ESP-NOW] MAC ของบอร์ดนี้ : ");
   Serial.println(WiFi.macAddress());   // เอาไปใส่ในตัวแปร checkpointMAC[] ของ ESP_Chair
@@ -1277,10 +1282,9 @@ void setup() {
     Serial.println();
   } else {
     Serial.println("  [WiFi] ยังไม่ได้เชื่อมต่อ — จะไล่หาบอร์ดเก้าอี้เพื่อขอค่า WiFi");
-    Serial.println("         (ตั้งค่า WiFi ที่บอร์ดเก้าอี้ที่เดียวพอ ที่นี่ไม่ต้องทำอะไร)");
-    Serial.print  ("         ถ้าไม่สำเร็จภายใน 90 วิ จะเปิด AP สำรองชื่อ \"");
+    Serial.print  ("         หรือต่อ WiFi \"");
     Serial.print(AP_SSID);
-    Serial.println("\" ให้ตั้งค่าเอง");
+    Serial.println("\" (รหัส " AP_PASSWORD ") แล้วตั้งค่าที่หน้าที่เด้งขึ้นมา");
   }
 
   // ----------------------------------------------------------
@@ -1377,15 +1381,6 @@ void loop() {
   applyPendingWifi();     // ได้ค่ามาแล้ว → เอาไปต่อ (ทำก่อนไล่ช่อง จะได้หยุดไล่ทันที)
   tickProvisioning();     // ยังไม่ได้ → วนเคาะถามไปทีละช่อง
 
-  // ทางกู้: ผ่านไป 3 นาทีแล้วยังไม่มี WiFi แปลว่า provision ไม่สำเร็จ (เก้าอี้ดับ /
-  // ยังไม่ได้ตั้งค่าเก้าอี้ / อยู่ไกลเกิน) ถ้าไม่เปิด AP ให้ บอร์ดนี้จะเข้าถึงไม่ได้เลย
-  // นอกจากถอดไปแฟลชใหม่ — ปกติจะไม่มีวันเห็น SSID นี้
-  if (!recoveryApOn && !portal.isConnected() && now > RECOVERY_AP_AFTER_MS) {
-    recoveryApOn = true;
-    Serial.println();
-    Serial.println("  [Provision] ⚠️  ยังไม่ได้ WiFi ใน 90 วิ — เปิด AP สำรองให้ตั้งค่าเอง");
-    portal.enableApNow();
-  }
 
   // สถานะเปลี่ยน = ดัน heartbeat ขึ้นเว็บทันที
   // สำคัญมากตอนออกจาก CP_DETECTING เพราะช่วงนั้นบอร์ดหยุดส่ง heartbeat ไปเลย
