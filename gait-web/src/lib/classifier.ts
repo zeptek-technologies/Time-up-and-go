@@ -25,8 +25,19 @@ const HEMIPLEGIC_SYMMETRY_MIN = 0.45;
 
 // Steppage / foot-drop: exaggerated hip+knee flexion to clear a dropped foot,
 // usually unilateral (ref: Physiopedia "Foot drop"; StatPearls "Steppage Gait").
+// Both signs are read over the feature WINDOW (knee lift = range, knee angle =
+// minimum). Reading the instantaneous knee angle made the rule fire only while
+// the knee was actually bent (~20-35% of frames), so a sustained steppage gait
+// flickered and never reached the session's RISK_MIN_SHARE.
 const STEPPAGE_KNEE_LIFT_MIN = 0.105;
 const STEPPAGE_KNEE_FLEXION_MAX_ANGLE = 132.0;
+
+function isSteppage(f: GaitFeatures): boolean {
+  return (
+    maxNaN(f.leftKneeLift, f.rightKneeLift) > STEPPAGE_KNEE_LIFT_MIN &&
+    minNaN(f.leftKneeAngleMin, f.rightKneeAngleMin) < STEPPAGE_KNEE_FLEXION_MAX_ANGLE
+  );
+}
 
 export type GaitLabel = "Normal" | "Parkinsonian" | "Hemiplegic" | "Steppage";
 
@@ -49,10 +60,7 @@ export class RuleBasedGaitClassifier {
       return { status: "No Pose Detected", color: "#f59e0b", reasons: ["Move fully into camera view"] };
     }
 
-    const steppage =
-      maxNaN(features.leftKneeLift, features.rightKneeLift) > STEPPAGE_KNEE_LIFT_MIN &&
-      minNaN(features.leftKneeAngle, features.rightKneeAngle) < STEPPAGE_KNEE_FLEXION_MAX_ANGLE;
-    if (steppage) {
+    if (isSteppage(features)) {
       const side = features.leftKneeLift > features.rightKneeLift ? "left" : "right";
       return {
         status: "Possible Steppage Gait",
@@ -112,10 +120,7 @@ export class RuleBasedSideGaitClassifier {
 
     // Steppage reads well from the side (the exaggerated hip/knee flexion to
     // clear a dropped foot is a sagittal motion) — same rule as the front.
-    const steppage =
-      maxNaN(features.leftKneeLift, features.rightKneeLift) > STEPPAGE_KNEE_LIFT_MIN &&
-      minNaN(features.leftKneeAngle, features.rightKneeAngle) < STEPPAGE_KNEE_FLEXION_MAX_ANGLE;
-    if (steppage) {
+    if (isSteppage(features)) {
       return {
         status: "Possible Steppage Gait",
         color: "#fb923c",

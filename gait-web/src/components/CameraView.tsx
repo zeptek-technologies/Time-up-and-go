@@ -50,11 +50,11 @@ export default function CameraView({ view, label, onFrame, onPose }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const onFrameRef = useRef(onFrame);
-  onFrameRef.current = onFrame;
   const onPoseRef = useRef(onPose);
   useEffect(() => {
+    onFrameRef.current = onFrame;
     onPoseRef.current = onPose;
-  }, [onPose]);
+  }, [onFrame, onPose]);
 
   // Camera starts OFF by default: this component is always mounted (the whole
   // app is one long scrolling page), so auto-starting would prompt for camera
@@ -78,14 +78,19 @@ export default function CameraView({ view, label, onFrame, onPose }: Props) {
     else localStorage.removeItem(storageKey);
   };
 
+  // ปิดกล้อง = ป้ายสถานะกลับเป็น "ปิด" ทันทีจากตัวจัดการปุ่ม (ไม่ตั้ง state ใน effect)
+  const stopCamera = () => {
+    setOn(false);
+    setStatus("off");
+  };
+
   useEffect(() => {
-    if (!on) {
-      setStatus("off");
-      return;
-    }
+    if (!on) return;
 
     let stream: MediaStream | null = null;
     let stopped = false;
+    // จับ element ไว้ตั้งแต่ต้น effect ให้ cleanup ยกเลิก callback กับตัวเดียวกับที่ลงทะเบียนไว้
+    const videoEl = videoRef.current as RVFCVideo | null;
 
     function clearOverlay() {
       const canvas = canvasRef.current;
@@ -285,8 +290,7 @@ export default function CameraView({ view, label, onFrame, onPose }: Props) {
       window.clearInterval(watchdog);
       clearOverlay(); // ปิดกล้องแล้วต้องไม่เหลือโครงกระดูกค้างบนจอ
       cancelAnimationFrame(rafId);
-      const v = videoRef.current as RVFCVideo | null;
-      if (v && rvfcId && typeof v.cancelVideoFrameCallback === "function") v.cancelVideoFrameCallback(rvfcId);
+      if (videoEl && rvfcId && typeof videoEl.cancelVideoFrameCallback === "function") videoEl.cancelVideoFrameCallback(rvfcId);
       stream?.getTracks().forEach((t) => t.stop());
       engine.close();
     };
@@ -315,7 +319,7 @@ export default function CameraView({ view, label, onFrame, onPose }: Props) {
           </select>
           {status !== "off" && <span className={`gc-cam__badge gc-cam__badge--${status}`}>{STATUS_TH[status]}</span>}
           {on && (
-            <button type="button" className="gc-cam__stop-btn" onClick={() => setOn(false)}>
+            <button type="button" className="gc-cam__stop-btn" onClick={stopCamera}>
               ปิดกล้อง
             </button>
           )}

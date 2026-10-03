@@ -145,6 +145,14 @@ export class TimeWindowBuffer {
     return mn === Infinity ? NaN : mx - mn;
   }
 
+  /** Smallest value over the window, or NaN if not enough data yet. */
+  min(): number {
+    if (!this.ready()) return NaN;
+    let mn = Infinity;
+    for (const v of this.values) if (Number.isFinite(v) && v < mn) mn = v;
+    return mn === Infinity ? NaN : mn;
+  }
+
   median(): number {
     return median(this.values);
   }

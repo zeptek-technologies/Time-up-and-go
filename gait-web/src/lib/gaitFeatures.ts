@@ -22,6 +22,12 @@ import { StepTracker } from "./stepTracker";
 export interface GaitFeatures {
   leftKneeAngle: number;
   rightKneeAngle: number;
+  // Smallest knee angle over the feature window (= peak swing-phase flexion).
+  // The instantaneous angle only dips while the foot is in the air, so a rule
+  // reading it flickers on/off every stride; the windowed minimum is steady for
+  // as long as the pattern persists — same basis as the (windowed) knee lift.
+  leftKneeAngleMin: number;
+  rightKneeAngleMin: number;
   leftHipAngle: number;
   rightHipAngle: number;
   stepLength: number;
@@ -69,6 +75,8 @@ export class GaitFeatureExtractor {
   private rightAnkleX: TimeWindowBuffer;
   private leftKneeY: TimeWindowBuffer;
   private rightKneeY: TimeWindowBuffer;
+  private leftKneeAngleBuf: TimeWindowBuffer;
+  private rightKneeAngleBuf: TimeWindowBuffer;
   private bodyHeight: TimeWindowBuffer;
   private stepTracker: StepTracker;
 
@@ -80,6 +88,8 @@ export class GaitFeatureExtractor {
     this.rightAnkleX = mk();
     this.leftKneeY = mk();
     this.rightKneeY = mk();
+    this.leftKneeAngleBuf = mk();
+    this.rightKneeAngleBuf = mk();
     this.bodyHeight = new TimeWindowBuffer(opts.bodyHeightWindowMs, 0);
     this.stepTracker = new StepTracker(opts.gaitWindowMs, opts.minStepIntervalMs, opts.stepFloorMeters);
   }
@@ -160,6 +170,10 @@ export class GaitFeatureExtractor {
     this.rightAnkleX.push(tMs, rightAnkle[0]);
     this.leftKneeY.push(tMs, leftKnee[1]);
     this.rightKneeY.push(tMs, rightKnee[1]);
+    if (Number.isFinite(leftKneeAngle)) this.leftKneeAngleBuf.push(tMs, leftKneeAngle);
+    if (Number.isFinite(rightKneeAngle)) this.rightKneeAngleBuf.push(tMs, rightKneeAngle);
+    const leftKneeAngleMin = this.leftKneeAngleBuf.min();
+    const rightKneeAngleMin = this.rightKneeAngleBuf.min();
 
     const leftArmSwing = this.leftWristRelX.range() / scale;
     const rightArmSwing = this.rightWristRelX.range() / scale;
@@ -178,7 +192,7 @@ export class GaitFeatureExtractor {
     const weakSide = inferWeakSide(leftLegSwing, rightLegSwing);
 
     return {
-      leftKneeAngle, rightKneeAngle, leftHipAngle, rightHipAngle,
+      leftKneeAngle, rightKneeAngle, leftKneeAngleMin, rightKneeAngleMin, leftHipAngle, rightHipAngle,
       stepLength, leftArmSwing, rightArmSwing, meanArmSwing, armSwingAsymmetry,
       symmetryIndex, trunkLean, leftKneeLift, rightKneeLift,
       leftArmCloseToChest: leftArmClose,
@@ -198,6 +212,8 @@ export class GaitFeatureExtractor {
     this.rightAnkleX.clear();
     this.leftKneeY.clear();
     this.rightKneeY.clear();
+    this.leftKneeAngleBuf.clear();
+    this.rightKneeAngleBuf.clear();
     this.bodyHeight.clear();
     this.stepTracker.reset();
   }

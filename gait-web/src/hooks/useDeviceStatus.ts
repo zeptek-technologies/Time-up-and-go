@@ -24,19 +24,22 @@ export interface DeviceView extends DeviceStatus {
 }
 
 export function useDeviceStatus(deviceId: DeviceId): DeviceView {
-  const [raw, setRaw] = useState<DeviceStatus | null>(null);
+  // Snapshot is keyed by the device it came from: switching devices then reads
+  // as "no data yet" without a setState-in-effect reset, and a late callback
+  // from the previous subscription can never show up under the new device.
+  const [snapshot, setSnapshot] = useState<{ deviceId: DeviceId; raw: DeviceStatus } | null>(null);
+  const raw = snapshot?.deviceId === deviceId ? snapshot.raw : null;
   const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
 
   useEffect(() => {
     let unsub = () => {};
     let cancelled = false;
-    setRaw(null); // reset when switching device
     ensureAuth().then((ok) => {
       if (ok && !cancelled) {
         // ต้องมี error handler เสมอ ไม่งั้น error จาก Firestore (เช่น permission-denied
         // เพราะยังไม่ publish rules) จะเงียบสนิท แล้วหน้าจอค้างที่ "กำลังค้นหาอุปกรณ์"
         // โดยไม่มีเบาะแสว่าเกิดอะไรขึ้น
-        unsub = subscribeDeviceStatus(deviceId, setRaw, (err) =>
+        unsub = subscribeDeviceStatus(deviceId, (status) => setSnapshot({ deviceId, raw: status }), (err) =>
           console.error(`[DeviceStatus:${deviceId}]`, err.message),
         );
       }

@@ -30,7 +30,9 @@ export function useCameraDevices() {
   }, []);
 
   useEffect(() => {
-    refresh();
+    // refresh() sets state only after an await, never synchronously in the
+    // effect body; queueing it keeps that explicit for the hooks lint rule.
+    queueMicrotask(() => void refresh());
     const md = navigator.mediaDevices;
     // Fires when a camera is plugged in or removed.
     md?.addEventListener?.("devicechange", refresh);

@@ -4,7 +4,7 @@ import type { GaitFeatures } from "./gaitFeatures";
 import type { GaitPrediction } from "./classifier";
 
 const NUMERIC_FIELDS: (keyof GaitFeatures)[] = [
-  "leftKneeAngle", "rightKneeAngle", "leftHipAngle", "rightHipAngle",
+  "leftKneeAngle", "rightKneeAngle", "leftKneeAngleMin", "rightKneeAngleMin", "leftHipAngle", "rightHipAngle",
   "stepLength", "leftArmSwing", "rightArmSwing", "meanArmSwing", "armSwingAsymmetry",
   "symmetryIndex", "trunkLean", "leftKneeLift", "rightKneeLift",
 ];

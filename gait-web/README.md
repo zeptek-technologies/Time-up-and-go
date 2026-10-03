@@ -14,7 +14,12 @@ cd gait-web
 npm install
 npm run dev        # http://localhost:5173  (getUserMedia ทำงานบน localhost)
 npm run build      # production build
+npm test           # ทดสอบด้วยข้อมูลจำลอง ไม่ต้องใช้กล้อง (tests/*.mjs)
 ```
+
+`tests/gaitClassifier.mjs` จำลองท่าเดิน 5 แบบ (ปกติ / ลากเท้า / โน้มตัว / อัมพาตครึ่งซีก /
+เท้าตก) เป็น landmark 33 จุดที่ 30 fps แล้ววิ่งผ่าน pipeline ทั้งสาย เพื่อล็อกกฎของ
+classifier, การสรุปผลทั้งรอบ (recorder) และตัวนับก้าว
 
 เปิดในเบราว์เซอร์แล้วอนุญาตให้เข้าถึงกล้อง → จะเห็น skeleton overlay + ตัวชี้วัด gait
 แบบเรียลไทม์ กด **● เริ่มบันทึก** เพื่อเก็บเฟรม แล้ว **จบ & อัปโหลดผล** เพื่อบันทึกลง Firestore
